@@ -19,3 +19,4 @@ This public repository contains the R code scripts to reproduce the main results
 - Pathway analysis: 8. Pathway_Analysis.RMD
 
 ## Contributors:
+This code was created by members of the [Laboratory for Neuroimmunology](https://gbiomed.kuleuven.be/english/research/50000666/50000668/50525530/laboratory-for-neuroimmunology) at the KU Leuven (Belgium).
