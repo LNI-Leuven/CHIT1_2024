@@ -14,6 +14,7 @@ This public repository contains the R code scripts to reproduce the main results
 - `results` is a directory with figures, arrays and models resulting from `code.ipynb`.
 
 **Single-cell/nucleus transcriptomics**
+
 These are R Markdown documents written in R.
 - Quality control: `1. Quality_Control_CSF.Rmd` and `2. Quality_Control_CNS.Rmd`
 - Integration: `3. Integration_With_Harmony.Rmd`
