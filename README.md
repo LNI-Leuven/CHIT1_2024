@@ -14,13 +14,14 @@ This public repository contains the R code scripts to reproduce the main results
 - `results` is a directory with figures, arrays and models resulting from `code.ipynb`.
 
 **Single-cell/nucleus transcriptomics**
-- Quality control: `1. Quality_Control_CSF.rmd` and `2. Quality_Control_CNS.rmd`
-- Integration: `3. Integration_With_Harmony.rmd`
-- Myeloid subclustering: `4. Myeloid_Subclustering.rmd`
-- Cluster annotation: `5. Cluster_Annotation.rmd`
-- Trajectory analysis: `6. Trajectory_Analysis.rmd`
-- Distribution and DGE CHIT1+ cells: `7. Distribution_And_DGE_CHIT1_Cells.rmd`
-- Pathway analysis: `8. Pathway_Analysis.rmd`
+These are R Markdown documents written in R.
+- Quality control: `1. Quality_Control_CSF.Rmd` and `2. Quality_Control_CNS.Rmd`
+- Integration: `3. Integration_With_Harmony.Rmd`
+- Myeloid subclustering: `4. Myeloid_Subclustering.Rmd`
+- Cluster annotation: `5. Cluster_Annotation.Rmd`
+- Trajectory analysis: `6. Trajectory_Analysis.Rmd`
+- Distribution and DGE CHIT1+ cells: `7. Distribution_And_DGE_CHIT1_Cells.Rmd`
+- Pathway analysis: `8. Pathway_Analysis.Rmd`
 
 ## Contributors:
-This code was created by members of the [Laboratory for Neuroimmunology](https://gbiomed.kuleuven.be/english/research/50000666/50000668/50525530/laboratory-for-neuroimmunology) at the KU Leuven (Belgium).
+This code was created by members of the [Laboratory for Neuroimmunology](https://gbiomed.kuleuven.be/english/research/50000666/50000668/50525530/laboratory-for-neuroimmunology) as well as the Department of Public Health and Primary Care at the KU Leuven (Belgium).
