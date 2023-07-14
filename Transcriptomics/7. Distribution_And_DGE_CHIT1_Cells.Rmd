@@ -1,0 +1,415 @@
+---
+title: "Distribution and DGE CHIT1 cells"
+author: "Stijn Swinnen and Jarne Beliën"
+date: "23-05-2023"
+output:
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+*Laboratory for Neuroimmunology; University of Leuven*
+
+
+- [Colors](https://coolors.co)
+
+
+*References to specific sources (e.g., articles and GitHub community pages) are provided in this script.*
+
+
+**Required packages (in alphabetical order):**
+
+```{r setup, Print Options}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r setup, Libraries}
+
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(scales)
+library(Seurat)
+library(tibble)
+library(viridis)
+library(writexl)
+
+setwd("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/6. CHIT1")
+```
+
+
+# 1. Loading in the data
+
+```{r, fig.dim = c(10, 7)}
+
+Seurat <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/3. Myeloid subclustering/Harmonized_Myeloid_cells.rds")
+DefaultAssay(Seurat)
+summary(Seurat@meta.data)
+Clusters <- c("MG1", "MG2", "MG9", "MG8", "MG4", "MG5", "MMC", "CAM2", "MG3", "MON", "CAM1", "MG7", "MG6")
+names(Clusters) <- levels(Seurat)
+Seurat <- RenameIdents(Seurat, Clusters)
+Seurat@active.ident <- factor(Seurat@active.ident, levels = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"))
+Seurat$clusters <- factor(Seurat@active.ident, levels = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"))
+Colors <- c("#52677A", "#6687A3", "#4D908E", "#43AA8B", "#6AB47C", "#90BE6D", "#C5C35E", "#F9C74F", "#F8961E", "#F3722C", "#F65A38", "#F94144", "#835D7A")
+UMAPPlot(Seurat, pt.size = 1, label = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+```
+
+
+# 2. CHIT1 cluster distribution
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Seurat, features = "CHIT1", pt.size = 1, order = TRUE) + scale_color_viridis()
+FeaturePlot(Seurat, features = "CHIT1", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot CHIT1-clusters.png", height = 5, width = 6, dpi = 300)
+VlnPlot(Seurat, features = "CHIT1") + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+
+CHIT1_Cells <- WhichCells(Seurat, expression = CHIT1 > 0)
+length(CHIT1_Cells)
+UMAPPlot(Seurat, cells.highlight = CHIT1_Cells, cols.highlight = "#43AA8B", pt.size = 1) + NoLegend()
+ggsave("UMAPPlot CHIT1-clusters.png", height = 5, width = 5, dpi = 300)
+
+as.numeric(length(CHIT1_Cells)/length(Seurat$orig.ident)) %>%
+  percent(accuracy = 0.1)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Seurat$CHIT1 <- as.factor(ifelse(FetchData(Seurat, vars = "CHIT1")$CHIT1 > 0, "Positive", "Negative"))
+CHIT1 <- as.data.frame(Seurat$CHIT1)
+colnames(CHIT1) <- "CHIT1"
+CHIT1 <- rownames_to_column(CHIT1, var = "Barcode")
+Cluster <- as.data.frame(Seurat$clusters)
+colnames(Cluster) <- "Cluster"
+Cluster <- rownames_to_column(Cluster, var = "Barcode")
+All_Data <- left_join(CHIT1, Cluster, by = "Barcode")
+CHIT1_Data <- All_Data %>% filter(CHIT1 == "Positive")
+
+Dataframe1 <- CHIT1_Data %>%
+  group_by(Cluster) %>%
+  count(name = "Number CHIT1 cells per cluster")
+Dataframe2 <- All_Data %>%
+  group_by(Cluster) %>%
+  count(name = "Number total cells per cluster")
+Dataframe <- right_join(Dataframe1, Dataframe2, by = "Cluster")
+Dataframe[is.na(Dataframe)] <- 0 # No CHIT1 cells in cluster CAM1
+Order <- c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC")
+Dataframe <- Dataframe %>% slice(match(Order, Cluster))
+Dataframe$`Proportion CHIT1 cells per cluster` <- Dataframe$`Number CHIT1 cells per cluster`/Dataframe$`Number total cells per cluster`
+Dataframe
+sum(Dataframe$`Number CHIT1 cells per cluster`)
+Dataframe_Clusters <- Dataframe
+
+ggplot(Dataframe, aes(x = Cluster, y = `Number CHIT1 cells per cluster`, fill = Cluster)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(hjust = 0.5, vjust = 0.5, size = 8), legend.position = "none")
+
+ggplot(Dataframe, aes(x = Cluster, y = `Proportion CHIT1 cells per cluster`, fill = Cluster)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(hjust = 0.5, vjust = 0.5, size = 8), legend.position = "none")
+```
+
+
+# 3. CHIT1 tissue distribution
+
+*Note: The available metadata does not allow us to make a distinction between white and grey matter cells within the brain and spinal cord, since the only two categories are "White and grey matter" and "White matter".*
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Seurat, pt.size = 1, split.by = "tissue", label = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+UMAPPlot(Seurat, cells.highlight = CHIT1_Cells, cols.highlight = "#43AA8B", pt.size = 1, split.by = "tissue") + NoLegend()
+Object_List <- SplitObject(Seurat, split.by = "tissue")
+Plot_List <- lapply(Object_List, FUN = function(x) {
+  UMAPPlot(x, cells.highlight = CHIT1_Cells, cols.highlight = "#43AA8B", pt.size = 1) + NoLegend()
+})
+Plot_List$Brain
+ggsave("UMAPPlot CHIT1-tissue Brain.png", height = 5, width = 5, dpi = 300)
+Plot_List$CSF
+ggsave("UMAPPlot CHIT1-tissue CSF.png", height = 5, width = 5, dpi = 300)
+Plot_List$`Spinal cord`
+ggsave("UMAPPlot CHIT1-tissue Spinal cord.png", height = 5, width = 5, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Tissue <- as.data.frame(Seurat$tissue)
+colnames(Tissue) <- "Tissue"
+Tissue <- rownames_to_column(Tissue, var = "Barcode")
+All_Data <- left_join(All_Data, Tissue, by = "Barcode")
+CHIT1_Data <- All_Data %>% filter(CHIT1 == "Positive")
+
+Dataframe1 <- CHIT1_Data %>%
+  group_by(Tissue) %>%
+  count(name = "Number CHIT1 cells per tissue")
+Dataframe2 <- All_Data %>%
+  group_by(Tissue) %>%
+  count(name = "Number total cells per tissue")
+Dataframe <- left_join(Dataframe1, Dataframe2, by = "Tissue")
+Dataframe$`Proportion CHIT1 cells per tissue` <- Dataframe$`Number CHIT1 cells per tissue`/Dataframe$`Number total cells per tissue`
+Dataframe
+sum(Dataframe$`Number CHIT1 cells per tissue`)
+Dataframe_Tissue <- Dataframe
+
+ggplot(Dataframe, aes(x = Tissue, y = `Proportion CHIT1 cells per tissue`, fill = Tissue)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_grey() +
+  theme_classic() +
+  theme(axis.text.x = element_text(hjust = 0.5, vjust = 0.5, size = 8), legend.position = "none")
+```
+
+
+# 4. CHIT1 pathology distribution
+
+
+## 4.1 Pathology
+
+Because pathology/lesions are only present within the CNS (brain and spinal cord), we subset the Seurat object to omit CSF cells.
+
+```{r, fig.dim = c(10, 7)}
+
+Seurat@active.ident <- as.factor(Seurat$tissue)
+levels(Seurat)
+Seurat_CNS <- subset(Seurat, idents = c("Brain", "Spinal cord"))
+Seurat@active.ident <- Seurat$clusters
+Seurat_CNS@active.ident <- Seurat_CNS$clusters
+length(Seurat_CNS$orig.ident)
+
+CHIT1_Cells_CNS <- subset(CHIT1_Cells, CHIT1_Cells %in% Cells(Seurat_CNS))
+length(CHIT1_Cells_CNS)
+
+as.numeric(length(CHIT1_Cells_CNS)/length(Seurat_CNS$orig.ident)) %>%
+  percent(accuracy = 0.1)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Seurat_CNS, pt.size = 1, split.by = "pathology", label = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+UMAPPlot(Seurat_CNS, cells.highlight = CHIT1_Cells_CNS, cols.highlight = "#43AA8B", pt.size = 1, split.by = "pathology") + NoLegend()
+Object_List <- SplitObject(Seurat_CNS, split.by = "pathology")
+Plot_List <- lapply(Object_List, FUN = function(x) {
+  UMAPPlot(x, cells.highlight = CHIT1_Cells_CNS, cols.highlight = "#43AA8B", pt.size = 1) + NoLegend()
+})
+Plot_List$Lesion
+ggsave("UMAPPlot CHIT1-pathology Lesion.png", height = 5, width = 5, dpi = 300)
+Plot_List$`Lesion core`
+ggsave("UMAPPlot CHIT1-pathology Lesion core.png", height = 5, width = 5, dpi = 300)
+Plot_List$`Lesion edge`
+ggsave("UMAPPlot CHIT1-pathology Lesion edge.png", height = 5, width = 5, dpi = 300)
+Plot_List$Periplaque
+ggsave("UMAPPlot CHIT1-pathology Periplaque.png", height = 5, width = 5, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Pathology <- as.data.frame(Seurat_CNS$pathology)
+colnames(Pathology) <- "Pathology"
+Pathology <- rownames_to_column(Pathology, var = "Barcode")
+All_Data <- left_join(All_Data, Pathology, by = "Barcode")
+CHIT1_Data <- All_Data %>% filter(CHIT1 == "Positive")
+
+Dataframe1 <- CHIT1_Data %>%
+  group_by(Pathology) %>%
+  count(name = "Number CHIT1 cells per pathology")
+Dataframe2 <- All_Data %>%
+  group_by(Pathology) %>%
+  count(name = "Number total cells per pathology")
+Dataframe <- left_join(Dataframe1, Dataframe2, by = "Pathology")
+Dataframe <- Dataframe[1:4, ]
+Dataframe$`Proportion CHIT1 cells per pathology` <- Dataframe$`Number CHIT1 cells per pathology`/Dataframe$`Number total cells per pathology`
+Dataframe
+sum(Dataframe$`Number CHIT1 cells per pathology`)
+Dataframe_Pathology <- Dataframe
+
+ggplot(Dataframe, aes(x = Pathology, y = `Proportion CHIT1 cells per pathology`, fill = Pathology)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_grey() +
+  theme_classic() +
+  theme(axis.text.x = element_text(hjust = 0.5, vjust = 0.5, size = 8), legend.position = "none")
+```
+
+
+## 4.2 Pathology activity
+
+Because pathology/lesion activity metadata is not available for all CNS cells, we subset the Seurat object.
+
+```{r, fig.dim = c(10, 7)}
+
+Seurat_CNS@active.ident <- as.factor(Seurat_CNS$pathology.activity)
+levels(Seurat_CNS)
+Seurat_CNS_Activity <- subset(Seurat_CNS, idents = c("Acute/chronic active", "Chronic active", "Chronic inactive"))
+Seurat_CNS@active.ident <- Seurat_CNS$clusters
+Seurat_CNS_Activity@active.ident <- Seurat_CNS_Activity$clusters
+length(Seurat_CNS_Activity$orig.ident)
+
+CHIT1_Cells_CNS_Activity <- subset(CHIT1_Cells, CHIT1_Cells %in% Cells(Seurat_CNS_Activity))
+length(CHIT1_Cells_CNS_Activity)
+
+as.numeric(length(CHIT1_Cells_CNS_Activity)/length(Seurat_CNS_Activity$orig.ident)) %>%
+  percent(accuracy = 0.1)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Seurat_CNS_Activity, pt.size = 1, split.by = "pathology.activity", label = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+UMAPPlot(Seurat_CNS_Activity, cells.highlight = CHIT1_Cells_CNS_Activity, cols.highlight = "#43AA8B", pt.size = 1, split.by = "pathology.activity") + NoLegend()
+Object_List <- SplitObject(Seurat_CNS_Activity, split.by = "pathology.activity")
+Plot_List <- lapply(Object_List, FUN = function(x) {
+  UMAPPlot(x, cells.highlight = CHIT1_Cells_CNS_Activity, cols.highlight = "#43AA8B", pt.size = 1) + NoLegend()
+})
+Plot_List$`Acute/chronic active`
+ggsave("UMAPPlot CHIT1-pathology.activity Acute-chronic active.png", height = 5, width = 5, dpi = 300)
+Plot_List$`Chronic active`
+ggsave("UMAPPlot CHIT1-pathology.activity Chronic active.png", height = 5, width = 5, dpi = 300)
+Plot_List$`Chronic inactive`
+ggsave("UMAPPlot CHIT1-pathology.activity Chronic inactive.png", height = 5, width = 5, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Pathology.activity <- as.data.frame(Seurat_CNS_Activity$pathology.activity)
+colnames(Pathology.activity) <- "Pathology.activity"
+Pathology.activity <- rownames_to_column(Pathology.activity, var = "Barcode")
+All_Data <- left_join(All_Data, Pathology.activity, by = "Barcode")
+CHIT1_Data <- All_Data %>% filter(CHIT1 == "Positive")
+
+Dataframe1 <- CHIT1_Data %>%
+  group_by(Pathology.activity) %>%
+  count(name = "Number CHIT1 cells per pathology.activity")
+Dataframe2 <- All_Data %>%
+  group_by(Pathology.activity) %>%
+  count(name = "Number total cells per pathology.activity")
+Dataframe <- left_join(Dataframe1, Dataframe2, by = "Pathology.activity")
+Dataframe <- Dataframe[1:3, ]
+Dataframe$`Proportion CHIT1 cells per pathology.activity` <- Dataframe$`Number CHIT1 cells per pathology.activity`/Dataframe$`Number total cells per pathology.activity`
+Dataframe
+sum(Dataframe$`Number CHIT1 cells per pathology.activity`)
+Dataframe_Pathology.activity <- Dataframe
+
+ggplot(Dataframe, aes(x = Pathology.activity, y = `Proportion CHIT1 cells per pathology.activity`, fill = Pathology.activity)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_grey() +
+  theme_classic() +
+  theme(axis.text.x = element_text(hjust = 0.5, vjust = 0.5, size = 8), legend.position = "none")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Dataframe1 <- CHIT1_Data %>%
+  group_by(Pathology) %>%
+  count(Pathology.activity, name = "Number CHIT1 cells per pathology per pathology.activity")
+Dataframe2 <- All_Data %>%
+  group_by(Pathology) %>%
+  count(Pathology.activity, name = "Number total cells per pathology per pathology.activity")
+Dataframe <- cbind(Dataframe1, Dataframe2$`Number total cells per pathology per pathology.activity`)
+colnames(Dataframe) <- c("Pathology", "Pathology.activity", "Number CHIT1 cells per pathology per pathology.activity", "Number total cells per pathology per pathology.activity")
+Dataframe <- Dataframe[c(1:2, 5:6), ]
+Dataframe$`Proportion CHIT1 cells per pathology per pathology.activity` <- Dataframe$`Number CHIT1 cells per pathology per pathology.activity`/Dataframe$`Number total cells per pathology per pathology.activity`
+Dataframe
+sum(Dataframe$`Number CHIT1 cells per pathology per pathology.activity`)
+Dataframe_Pathology_Pathology.activity <- Dataframe
+
+ggplot(Dataframe, aes(x = Pathology, y = `Proportion CHIT1 cells per pathology per pathology.activity`, fill = Pathology.activity)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_grey() +
+  theme_classic() +
+  theme(axis.text.x = element_text(hjust = 0.5, vjust = 0.5, size = 8))
+```
+
+```{r, fig.dim = c(10, 7)}
+
+write_xlsx(list(All_Data, CHIT1_Data, Dataframe_Clusters, Dataframe_Tissue, Dataframe_Pathology, Dataframe_Pathology.activity, Dataframe_Pathology_Pathology.activity), path = "Distribution CHIT1 results.xlsx")
+```
+
+
+# 5. Differential gene expression (DGE) CHIT1-positive versus CHIT1-negative cells
+
+- *FindMarkers*. Default logfc.threshold = 0.25; changed to 0 for volcano plot and GSEA. Default test.use = "wilcox" (Wilcoxon rank sum test). Default min.pct (only test genes detected in a minimum fraction of cells) = 0.1; changed to 0 for volcano plot and GSEA. p_val_adj = Adjusted p-value based on Bonferroni correction.
+
+```{r, fig.dim = c(10, 7)}
+
+Seurat@active.ident <- Seurat$CHIT1
+Markers <- FindMarkers(Seurat, ident.1 = "Positive", ident.2 = "Negative", logfc.threshold = 0, min.pct = 0, verbose = FALSE)
+Markers <- Markers %>%
+  arrange(desc(avg_log2FC))
+Markers <- rownames_to_column(Markers, var = "gene")
+Markers <- Markers[c("gene", "avg_log2FC", "p_val_adj", "p_val", "pct.1", "pct.2")]
+```
+
+*Volcano plot:*
+
+Threshold up- and downregulation = **25%** in- or decrease in expression = (-)1.25 fold change = (-)0.322 log2 fold change.
+
+Threshold statistical significance = Bonferroni-adjusted p-value **< 0.05**.
+
+```{r, fig.dim = c(10, 7)}
+
+Markers_Volcano <- Markers
+Markers_Volcano$de <- "No change"
+Markers_Volcano$de[Markers_Volcano$avg_log2FC > 0.322 & Markers_Volcano$p_val_adj < 0.05] <- "Upregulated"
+Markers_Volcano$de[Markers_Volcano$avg_log2FC < -0.322 & Markers_Volcano$p_val_adj < 0.05] <- "Downregulated"
+Markers_Volcano <- Markers_Volcano[-1, ]
+rownames(Markers_Volcano) <- NULL
+Top_Genes <- bind_rows(
+  Markers_Volcano %>%
+    filter(de == "Upregulated") %>%
+    arrange(p_val_adj, desc(abs(avg_log2FC))) %>%
+    head(15),
+  Markers_Volcano %>%
+    filter(de == "Downregulated") %>%
+    arrange(p_val_adj, desc(abs(avg_log2FC))) %>%
+    head(2)
+)
+
+ggplot(Markers_Volcano, aes(x = avg_log2FC, y = -log10(p_val_adj), col = de, label = gene)) +
+  geom_vline(xintercept = c(-0.322, 0.322), col = "grey", linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), col = "grey", linetype = "dashed") +
+  geom_point() +
+  scale_color_manual(values = c("#004777", "grey", "#A30000")) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(xlim = c(-1.2, 1.2), ylim = c(0, 200)) +
+  theme_classic() +
+  theme(legend.position = "none", axis.text.x = element_text(size = 15), axis.text.y = element_text(size = 15), axis.line.x = element_line(size = 1), axis.line.y = element_line(size = 1)) +
+  geom_text_repel(data = Top_Genes, min.segment.length = 5, max.overlaps = Inf, col = "black", size = 4, fontface = "bold.italic")
+ggsave("Volcanoplot.png", height = 5, width = 7, dpi = 300)
+
+#without labels and background for setup figure
+ggplot(Markers_Volcano, aes(x = avg_log2FC, y = -log10(p_val_adj), col = de, label = NULL)) +
+  geom_vline(xintercept = c(-0.322, 0.322), col = "grey", linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), col = "grey", linetype = "dashed") +
+  geom_point() +
+  scale_color_manual(values = c("#004777", "grey", "#A30000")) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_cartesian(xlim = c(-1.2, 1.2), ylim = c(0, 200)) +
+  theme_classic() +
+  theme(legend.position = "none", panel.background = element_rect(fill = "transparent"), # Transparent panel background
+    plot.background = element_rect(fill = "transparent", color = NA), # Transparent plot background
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(), # Remove minor grid lines
+    legend.background = element_rect(fill = "transparent"), # Transparent legend background
+    legend.box.background = element_rect(fill = "transparent")) # Transparent legend panel 
+ggsave("Volcanoplot_without_bg_and_labels.png", height = 5, width = 5, dpi = 300, bg = 'transparent')
+```
+
+**Gene set enrichment analysis (GSEA):**
+
+We only include genes with a Bonferroni-adjusted p-value **< 0.05**.
+
+```{r, fig.dim = c(10, 7)}
+
+Markers_GSEA <- Markers %>%
+  filter(p_val_adj < 0.05)
+write_xlsx(Markers_GSEA, path = "FindMarkers CHIT1 results.xlsx")
+```
+
+```{r, fig.dim = c(10, 7)}
+sessionInfo()
+```

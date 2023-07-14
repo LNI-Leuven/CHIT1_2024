@@ -1,0 +1,379 @@
+---
+title: "Pseudotime trajectory inference with Slingshot"
+author: "Stijn Swinnen and Jarne Beliën"
+date: "08-05-2023"
+output:
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+*Laboratory for Neuroimmunology; University of Leuven*
+
+
+**Based on (for the most part):**
+
+- [Trajectory inference analysis: Slingshot; NBI Sweden](https://nbisweden.github.io/workshop-archive/workshop-scRNAseq/2020-01-27/labs/compiled/slingshot/slingshot.html)
+
+- [Advanced Phenotyping in Single Cell Data Analysis; Sydney Precision Bioinformatics](https://sydneybiox.github.io/scdneyAdvancedPhenotyping/articles/advanced_phenotyping.html)
+
+- [Fitting the models and additional control of fitGAM in tradeSeq](https://statomics.github.io/tradeSeq/articles/fitGAM.html)
+
+- [The tradeSeq workflow](https://statomics.github.io/tradeSeq/articles/tradeSeq.html)
+
+
+*References to specific sources (e.g., articles and GitHub community pages) are provided in this script.*
+
+
+**Required packages:**
+
+```{r setup, Print Options}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r setup, Libraries}
+
+library(Seurat)
+library(ggplot2)
+library(ggthemes)
+library(ggridges)
+library(slingshot)
+library(viridisLite)
+library(rsample)
+library(parsnip)
+library(ranger)
+library(dplyr)
+library(yardstick)
+library(tradeSeq)
+
+setwd("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/5. Trajectory analysis")
+```
+
+
+# 1. Loading in the data
+
+```{r, fig.dim = c(10, 7)}
+
+seurat <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/3. Myeloid subclustering/Harmonized_Myeloid_cells.rds") 
+seurat@reductions
+DefaultAssay(seurat)
+summary(seurat@meta.data)
+Clusters <- c("MG1", "MG2", "MG9", "MG8", "MG4", "MG5", "MMC", "CAM2", "MG3", "MON", "CAM1", "MG7", "MG6")
+names(Clusters) <- levels(seurat)
+seurat <- RenameIdents(seurat, Clusters)
+seurat@active.ident <- factor(seurat@active.ident, levels = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"))
+seurat$clusters <- factor(seurat@active.ident, levels = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"))
+Colors <- c("#52677A", "#6687A3", "#4D908E", "#43AA8B", "#6AB47C", "#90BE6D", "#C5C35E", "#F9C74F", "#F8961E", "#F3722C", "#F65A38", "#F94144", "#835D7A")
+UMAPPlot(seurat, pt.size = 1, label = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+```
+
+
+# 2. Trajectory inference - unsupervised
+
+```{r, fig.dim = c(10, 7)}
+
+dimred <- seurat@reductions$umap@cell.embeddings
+clustering <- seurat@active.ident
+Trajectories <- slingshot(data = dimred, clusterLabels = clustering, stretch = 0)
+Trajectories
+Trajectories <- as.SlingshotDataSet(Trajectories)
+Trajectories
+par(mar = c(3.5, 3.5, 2.5, 4))
+#Lineages
+plot(dimred, col = Colors[clustering], bty = "l", cex = 0.3, cex.lab = 1.2, pch = 15)
+lines(Trajectories, type = "lineages")
+#Curves
+plot(dimred, col = Colors[clustering], bty = "l", cex = 0.3, cex.lab = 1.2, pch = 15)
+lines(Trajectories)
+```
+
+
+# 3. Trajectory inference - setting MG1 as starting point
+
+```{r, fig.dim = c(10, 7)}
+
+Trajectories <- slingshot(data = dimred, clusterLabels = clustering, stretch = 0, start.clus = "MG1")
+Trajectories
+Trajectories <- as.SlingshotDataSet(Trajectories)
+Trajectories
+par(mar = c(3.5, 3.5, 2.5, 4))
+#Lineages
+plot(dimred, col = Colors[clustering], bty = "l", cex = 0.3, cex.lab = 1.2, pch = 15)
+lines(Trajectories, type = "lineages")
+#Curves
+plot(dimred, col = Colors[clustering], bty = "l", cex = 0.3, cex.lab = 1.2, pch = 15)
+lines(Trajectories)
+```
+
+The presence of the monocyte/macrophage clusters as well as the mixed myeloid cluster (containing CSF-derived mDCs and CNS-derived microglia) introduces trajectories that we are not interested in and also do not make a lot of biological sense. Therefore, we exclude these clusters here before we infer the trajectories.
+
+
+# 4. Trajectory inference ONLY MICROGLIA - setting MG1 as starting point
+
+```{r, fig.dim = c(10, 7)}
+
+microglia <- subset(seurat, idents = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9"))
+
+Colors <- c("#52677A", "#6687A3", "#4D908E", "#43AA8B", "#6AB47C", "#90BE6D", "#C5C35E", "#F9C74F", "#F8961E")
+UMAPPlot(microglia, pt.size = 1, label = FALSE) + scale_color_manual(values = Colors) + NoLegend()
+ggsave("UMAP_microglia.png", height = 5, width = 5, dpi = 300)
+
+dimred <- microglia@reductions$umap@cell.embeddings
+clustering <- microglia@active.ident
+Trajectories <- slingshot(data = dimred, clusterLabels = clustering, stretch = 0, start.clus = "MG1")
+Trajectories
+Trajectories <- as.SlingshotDataSet(Trajectories)
+Trajectories
+par(mar = c(3.5, 3.5, 2.5, 4))
+#Lineages
+plot(dimred, col = Colors[clustering], bty = "l", cex = 0.3, cex.lab = 1.2, pch = 15)
+lines(Trajectories, type = "lineages")
+#Curves
+plot(dimred, col = Colors[clustering], bty = "l", cex = 0.3, cex.lab = 1.2, pch = 15)
+lines(Trajectories)
+```
+
+Curve 4 seems to give a warped idea of that specific trajectory, as if it turns back on itself. We try to set extend = "n":
+
+*The initial curve is always based on the lines between cluster centers and if extend = 'n', this curve will terminate at the center of the endpoint clusters.*
+
+```{r, fig.dim = c(10, 7)}
+
+Trajectories <- slingshot(data = dimred, clusterLabels = clustering, stretch = 0, start.clus = "MG1", extend = "n")
+Trajectories
+Trajectories <- as.SlingshotDataSet(Trajectories)
+Trajectories
+par(mar = c(3.5, 3.5, 2.5, 4))
+#Lineages
+plot(dimred, col = Colors[clustering], bty = "l", cex = 0.3, cex.lab = 1.2, pch = 15)
+lines(Trajectories, type = "lineages")
+#Curves
+plot(dimred, col = Colors[clustering], bty = "l", cex = 0.3, cex.lab = 1.2, pch = 15)
+lines(Trajectories)
+```
+
+Indeed our trajectories do not change, but the 2D visualization of the curves is more intuitive. 
+
+Improving the plot using ggplot2:
+```{r, fig.dim = c(10, 7)}
+
+df_toPlot <- data.frame(UMAP1 = dimred[, 1],
+                        UMAP2 = dimred[, 2],
+                        ClusterName = clustering)
+pseudotime_umap <- slingshot::slingPseudotime(Trajectories)
+df_toPlot <- cbind(df_toPlot, pseudotime_umap)
+
+curves <- slingCurves(Trajectories, as.df = TRUE)
+ggplot() +
+  geom_point(data = df_toPlot, aes(x = UMAP1, y = UMAP2, color = clustering)) +
+  geom_path(data = curves,
+            aes(x = UMAP_1, y = UMAP_2, group = Lineage),
+            size = 1) +
+  scale_color_manual(values = Colors) +
+  theme_classic()
+#ggsave("all_trajectories.png", height = 5, width = 6, dpi = 300)
+```
+
+
+# 5. Visualisation of the inferred pseudotimes
+
+```{r, fig.dim = c(10, 7)}
+
+df_toPlot2 <- reshape2::melt(df_toPlot, id = c("UMAP1", "UMAP2", "ClusterName"))
+colnames(df_toPlot2) <- c("UMAP1", "UMAP2", "ClusterName", "Lineages", "Pseudotime")
+ggplot() +
+  geom_point(data = df_toPlot2, aes(x = UMAP1, y = UMAP2, color = Pseudotime)) +
+  geom_path(data = curves,
+            aes(x = UMAP_1, y = UMAP_2, group = Lineage),
+            size = 1) +
+  scale_color_viridis_c() +
+  theme(aspect.ratio = 1) +
+  theme_bw() +
+  facet_wrap(~Lineages)
+#ggsave("Pseudotimes.png", height = 5, width = 6, dpi = 300)
+```
+
+
+# 6. Visualisation of the density of cells along the pseudotime
+
+```{r, fig.dim = c(10, 7)}
+
+ggplot() +
+  geom_density_ridges2(data = df_toPlot2, 
+                       aes(x = Pseudotime, y = ClusterName, fill = ClusterName), 
+                       alpha = 0.5) +
+  scale_fill_manual(values = Colors)  +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 12)) +
+  facet_wrap(~Lineages)
+ggsave("Pseudotime densities.png", height = 6, width = 6, dpi = 300)
+```
+
+
+# 7. Differential gene expression across pseudotime
+
+First we wanted to include all of the genes in the RNA count assay into our DE analysis. However, this means that we input a count matrix of around 30.000 genes to the *evaluateK* and *fitGAM* function, which turned out to require to much computing power and time, even on the supercomputer. Therefore, we decide to only include the 3000 most variable features from the SCT assay.
+
+We first rerun *SCTransform* on the **microglia** Seurat object, because the current SCT assay and its variable features were determined in the original seurat object, still including all myeloid cells.
+
+```{r, fig.dim = c(10, 7)}
+
+microglia <- SCTransform(microglia, vars.to.regress = c("percent.mt", "cc.difference", "percent.rb"), verbose = FALSE)
+microglia@assays
+```
+
+We export the count matrix of the RNA assay, only including the 3000 most variable genes defined with SCT and check whether CHIT1 is in there:
+```{r, fig.dim = c(10, 7)}
+
+counts <- as.matrix(microglia@assays$RNA@counts[microglia@assays$SCT@var.features, ])
+dim(counts)
+rownames(counts)
+grep("CHIT1", rownames(counts))
+```
+
+CHIT1 is present in the 3000 most variable features as determined in the new SCT assay.
+
+We export the necessary inputs here so that we can run these step on the VSC supercomputer:
+```{r, fig.dim = c(10, 7)}
+
+#saveRDS(counts, "counts.rds")
+#saveRDS(Trajectories, "Trajectories.rds")
+```
+
+The supercomputer script:
+```{r, fig.dim = c(10, 7)}
+
+#library(tradeSeq)
+#library(BiocParallel)
+
+#counts <- readRDS("counts.rds")
+#Trajectories <- readRDS("Trajectories.rds")
+
+#BPPARAM <- BiocParallel::bpparam()
+#BPPARAM$workers <- 30
+
+#set.seed(1)
+#icMat <- evaluateK(counts = counts, sds = Trajectories, k = 3:10, nGenes = 100, verbose = T, plot = TRUE, parallel=TRUE, BPPARAM = BPPARAM)
+#saveRDS(icMat, "icMat.rds")
+
+#Based on the diagnostic plots in icMat.rds, we decide to use n = 10 knots for fitGAM
+
+#set.seed(2)
+#sce <- fitGAM(counts = counts, sds = Trajectories, nknots = 10, verbose = TRUE, parallel=TRUE, BPPARAM = BPPARAM)
+
+#saveRDS(sce, "sce.rds")
+```
+
+Afterwards we continue in RStudio:
+```{r, fig.dim = c(10, 7)}
+
+icMat <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/5. Trajectory analysis/icMat.rds")
+icMat
+sce <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/5. Trajectory analysis/sce.rds")
+sce
+```
+
+For how many genes did the fitting procedure (not) converge?
+```{r, fig.dim = c(10, 7)}
+
+table(rowData(sce)$tradeSeq$converged)
+```
+
+The model fit converged for all genes. 
+
+
+## 7.1 Association of gene expresion with pseudotime
+
+First we check which gene's expression is associated with which lineages. We want to test across all lineages simultaneously (global = TRUE) as well as for each lineage separately (lineages = TRUE).
+```{r, fig.dim = c(10, 7)}
+
+assoRes <- associationTest(sce, global = TRUE, lineages = TRUE)
+assoRes <- assoRes[order(assoRes$waldStat, decreasing = TRUE),]
+head(assoRes, 10)
+assoRes['CHIT1',]
+```
+
+The p-value is indicated as zero here because it is very small, in order to get the full p-value:
+```{r, fig.dim = c(10, 7)}
+
+stats::pchisq(123.2889, df = 11, lower.tail = FALSE, log.p = FALSE)
+```
+
+We calculate the Benjamini-Hochberg-corrected p-value:
+```{r, fig.dim = c(10, 7)}
+
+assoRes$BH <- p.adjust(assoRes$pvalue_3, method = "BH")
+assoRes <- assoRes[order(assoRes$waldStat, decreasing = TRUE),]
+head(assoRes)
+assoRes['CHIT1',]
+```
+
+The adjusted p-value is again indicated as zero. In order to get the full BH-adjusted p-value we run the following code. We adjust for multiple testing of 3000 genes as well as 5 statistical tests per gene:
+```{r, fig.dim = c(10, 7)}
+
+p.adjust(3.946071e-21, method = "BH", n = 5*3000)
+```
+
+CHIT1 seems to be significantly associated with trajectory 3 (MG1  MG2  MG4  MG7  MG6).
+
+Visualization of CHIT1 expression along each lineage. From the pseudotime graph, we can check whether the expression of an identified DE gene indeed changes over pseudotime within each lineage:
+```{r, fig.dim = c(10, 7)}
+
+plotSmoothers(sce, counts(sce), gene = c("CHIT1"), size = 2, lwd = 1.5) +
+  theme(legend.title=element_blank(), axis.text.x = element_text(size = 15), axis.text.y = element_text(size = 15), axis.line.x =                   element_line(size = 1), axis.line.y = element_line(size = 1))
+ggsave("SmootherplotCHIT1.png", height = 7, width = 6, dpi = 300)
+
+DefaultAssay(microglia) <- "RNA"
+Plot <- FeaturePlot(microglia, "CHIT1", pt.size = 1, order = TRUE) + 
+            geom_path(data = curves, aes(x = UMAP_1, y = UMAP_2, group = Lineage), size = 1, colour = 'grey') +
+            scale_color_viridis_c() &
+            theme(panel.background = element_rect(fill='transparent'), #transparent panel bg
+            plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+            panel.grid.major = element_blank(), #remove major gridlines
+            panel.grid.minor = element_blank(), #remove minor gridlines
+            legend.background = element_rect(fill='transparent')) #transparent legend bg
+Plot
+ggsave("CHIT1+trajectories.png", height = 5, width = 5, dpi = 300, bg = 'transparent')
+```
+
+
+## 7.2 Differential gene expression between start and endpoints of lineages
+
+The function startVsEndTest uses a Wald test to assess the null hypothesis that the average expression at the starting point of the smoother (progenitor population) is equal to the average expression at the end point of the smoother (differentiated population). The function startVsEndTest performs a global test across all lineages by default (i.e. it compares the start and end positions for all lineages simultaneously), but you can also assess all lineages separately by setting lineages = TRUE.
+
+```{r, fig.dim = c(10, 7)}
+
+startRes <- startVsEndTest(sce, global = TRUE, lineages = TRUE)
+startRes <- startRes[order(startRes$waldStat, decreasing = TRUE),]
+head(startRes, 10)
+startRes['CHIT1',]
+```
+
+We calculate the BH-adjusted p-value across all lineages:
+```{r, fig.dim = c(10, 7)}
+
+p.adjust(2.213911e-05, method = "BH", n = 5*3000)
+```
+
+We see that CHIT1 is not significantly differentially expressed between the start and end points across all lineages when we correct for multiple testing.
+
+We finally check whether CHIT1 is differentially expressed between the start of the trajectories and pseudotime 7.5 across all lineages and for each lineage separately, which is more or less the middle of all trajectories:
+
+```{r, fig.dim = c(10, 7)}
+
+startRes_7.5 <- startVsEndTest(sce, global = TRUE, lineages = TRUE, pseudotimeValues = c(0,7.5))
+startRes_7.5 <- startRes_7.5[order(startRes_7.5$waldStat, decreasing = TRUE),]
+head(startRes_7.5, 10)
+startRes_7.5['CHIT1',]
+```
+
+We calculate the BH-adjusted p-value across all lineages:
+```{r, fig.dim = c(10, 7)}
+
+p.adjust(3.341487e-08, method = "BH", n = 5*3000)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+sessionInfo()
+```

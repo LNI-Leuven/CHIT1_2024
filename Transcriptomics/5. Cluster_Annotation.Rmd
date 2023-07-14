@@ -1,0 +1,1208 @@
+---
+title: "Annotation"
+author: "Stijn Swinnen and Jarne Beliën"
+date: "23-05-2023"
+output:
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+*Laboratory for Neuroimmunology; University of Leuven*
+
+
+**Based on (for the most part):**
+
+- [Satija Lab, Seurat vignettes](https://satijalab.org/seurat)
+
+- [Colors](https://coolors.co)
+
+- [Stats and R](https://statsandr.com/blog/kruskal-wallis-test-nonparametric-version-anova)
+
+- [ComplexHeatmap](https://jokergoo.github.io/ComplexHeatmap-reference/book)
+
+
+*References to specific sources (e.g., articles and GitHub community pages) are provided in this script.*
+
+
+**Required packages (in alphabetical order):**
+
+```{r setup, Print Options}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r setup, Libraries}
+
+library(ComplexHeatmap)
+library(dplyr)
+library(FSA)
+library(ggplot2)
+library(RColorBrewer)
+library(Seurat)
+library(showtext)
+library(viridis)
+library(writexl)
+
+setwd("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/4. Annotation")
+```
+
+
+# 1. Loading in the data
+
+```{r, fig.dim = c(10, 7)}
+
+Seurat <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/3. Myeloid subclustering/Harmonized_Myeloid_cells.rds")
+DefaultAssay(Seurat)
+summary(Seurat@meta.data)
+Colors <- c("#52677A", "#6687A3", "#F8961E", "#F9C74F", "#43AA8B", "#6AB47C", "#835D7A", "#F94144", "#4D908E", "#F3722C", "#F65A38", "#C5C35E", "#90BE6D")
+UMAPPlot(Seurat, pt.size = 1) + scale_color_manual(values = Colors) + NoLegend() &
+  theme(
+    panel.background = element_rect(fill = "transparent"), # Transparent panel background
+    plot.background = element_rect(fill = "transparent", color = NA), # Transparent plot background
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(), # Remove minor grid lines
+    legend.background = element_rect(fill = "transparent"), # Transparent legend background
+    legend.box.background = element_rect(fill = "transparent") # Transparent legend panel
+  )
+ggsave("UMAPPlot.png", height = 5, width = 5, dpi = 300, bg = 'transparent')
+
+UMAPPlot(Seurat, pt.size = 1, label = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+Clusters <- c("MG1", "MG2", "MG9", "MG8", "MG4", "MG5", "MMC", "CAM2", "MG3", "MON", "CAM1", "MG7", "MG6")
+names(Clusters) <- levels(Seurat)
+Seurat <- RenameIdents(Seurat, Clusters)
+UMAPPlot(Seurat, pt.size = 1, label = TRUE) + scale_color_manual(values = Colors) + NoLegend() &
+  theme(
+    panel.background = element_rect(fill = "transparent"), # Transparent panel background
+    plot.background = element_rect(fill = "transparent", color = NA), # Transparent plot background
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank(), # Remove minor grid lines
+    legend.background = element_rect(fill = "transparent"), # Transparent legend background
+    legend.box.background = element_rect(fill = "transparent") # Transparent legend panel
+  )
+ggsave("UMAPPlot_labels.png", height = 5, width = 5, dpi = 300, bg = 'transparent')
+
+Seurat@active.ident <- factor(Seurat@active.ident, levels = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"))
+Seurat$clusters <- factor(Seurat@active.ident, levels = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"))
+Colors <- c("#52677A", "#6687A3", "#4D908E", "#43AA8B", "#6AB47C", "#90BE6D", "#C5C35E", "#F9C74F", "#F8961E", "#F3722C", "#F65A38", "#F94144", "#835D7A")
+```
+
+
+# 2. Manual cluster annotation
+
+
+## 2.1 Canonical marker genes
+
+**Monocytes**
+
+- General Monocytes: Upregulation S100A8, S100A9, VCAN, CCR2, HLA-DPB1 and CD74.
+
+- CD14+ Monocytes: Upregulation CD14.
+
+- CD16+ Monocytes: Upregulation FCGR3A (CD16).
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Seurat, features = "S100A8", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "S100A8", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "S100A9", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "S100A9", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "VCAN", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "VCAN", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "CCR2", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "CCR2", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "HLA-DPB1", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "HLA-DPB1", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "CD74", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "CD74", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+
+FeaturePlot(Seurat, features = "CD14", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "CD14", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+
+FeaturePlot(Seurat, features = "FCGR3A", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "FCGR3A", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+```
+
+**Myeloid dendritic cells**
+
+- Myeloid dendritic cells 1 (mDC1): Upregulation WDFY4, XCR1, BATF3, AXL and SIGLEC6.
+
+- Myeloid dendritic cells 2 (mDC2)/classical: Upregulation FCER1A, CD1C, CLEC10A, CLEC9A.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Seurat, features = "WDFY4", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "WDFY4", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "XCR1", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "XCR1", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "BATF3", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "BATF3", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "AXL", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "AXL", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "SIGLEC6", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "SIGLEC6", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+
+FeaturePlot(Seurat, features = "FCER1A", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "FCER1A", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "CD1C", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "CD1C", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "CLEC10A", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "CLEC10A", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "CLEC9A", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "CLEC9A", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+```
+
+**Macrophages**
+
+- Macrophages: Upregulation EMP3 and LYVE1.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Seurat, features = "EMP3", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "EMP3", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "LYVE1", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "LYVE1", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+```
+
+**Microglia**
+
+- Microglia: Upregulation CD81, P2RY12, TMEM119, SPI1, TGFBR2, SLC2A5, MARCKS, CSF1R, IRF8 and SPP1.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Seurat, features = "CD81", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "CD81", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "P2RY12", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "P2RY12", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "TMEM119", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "TMEM119", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "SPI1", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "SPI1", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "TGFBR2", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "TGFBR2", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "SLC2A5", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "SLC2A5", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "MARCKS", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "MARCKS", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "CSF1R", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "CSF1R", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "IRF8", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "IRF8", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+FeaturePlot(Seurat, features = "SPP1", pt.size = 1) + scale_color_viridis()
+VlnPlot(Seurat, features = "SPP1", pt.size = 0) + scale_fill_manual(values = Colors) + NoLegend() + theme(axis.title.x = element_blank())
+```
+
+
+## 2.2 Differential gene expression (DGE) per cluster
+
+- *FindAllMarkers*. Default logfc.threshold = 0.25; changed to 0.322. Default test.use = "wilcox" (Wilcoxon rank sum test). Default min.pct (only test genes detected in a minimum fraction of cells) = 0.1; changed to 0.25. p_val_adj = Adjusted p-value based on Bonferroni correction.
+
+**25%** in- or decrease in expression = (-)1.25 fold change = (-)0.322 log2 fold.
+
+```{r, fig.dim = c(10, 7)}
+
+Markers <- FindAllMarkers(Seurat, logfc.threshold = 0.322, min.pct = 0.25, verbose = FALSE, only.pos = TRUE)
+DotPlot_Markers <- Markers %>%
+  group_by(cluster) %>%
+  slice_max(avg_log2FC, n = 5)
+DotPlot_Markers <- DotPlot_Markers$gene %>%
+  unique()
+font_add(family = "Myriad Pro Regular", regular = "Myriad Pro Regular.ttf")
+showtext_opts(dpi = 300)
+showtext_auto()
+DotPlot(Seurat, features = DotPlot_Markers) +
+  scale_color_viridis() +
+  theme(text = element_text(family = "Myriad Pro Regular"), axis.title = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 8), axis.text.y = element_text(vjust = 0.5, size = 8), legend.title = element_text(size = 8), legend.text = element_text(vjust = 0.5, size = 8)) +
+  guides(size = guide_legend(title = "Percentage expressed")) +
+  guides(color = guide_colorbar(title = "Average expression level"))
+ggsave("DotPlot.png", height = 3, width = 12, dpi = 300)
+
+Markers <- Markers[c("cluster", "gene", "avg_log2FC", "p_val_adj", "p_val", "pct.1", "pct.2")]
+options(max.print = 3000) # To overrule default max.print
+as.data.frame(Markers %>% group_by(cluster) %>% slice_max(avg_log2FC, n = 30))
+Markers <- Markers %>% group_by(cluster) %>% arrange(desc(avg_log2FC), .by_group = TRUE)
+write_xlsx(Markers, path = "FindAllMarkers results.xlsx")
+```
+
+
+# 3. Cluster annotation with module scores
+
+To characterize a particular cell state, e.g. homeostatic microglia, we want to explore the expression levels of a **group of genes** or gene set. Module score = average expression group of genes - expression random control genes on a single-cell level.
+
+*Reference AddModuleScore: Tirosh et al. (2016). Dissecting the multicellular ecosystem of metastatic melanoma by single-cell RNA-seq. Science.*
+
+- *AddModuleScore*. Default ctrl (control) = 100 (https://github.com/satijalab/seurat/issues/4558).
+
+
+We visualize the module score (continuous variable) in a **feature and box plot**; a box plot provides 5 summary statistics: Median, first (25th percentile) and third (75th percentile) quartile, and two whiskers no further than 1.5 * IQR (interquartile range). This way we aim to identify clusters enriched for a particular cell state. Outliers are not visualized in the box plots (not removed). In the first box plots the distribution of the module scores per cluster are illustrated; in the second box plots clusters of interest are compared with all other clusters combined in a singular box plot (to ease visualization).
+
+Afterwards, we test whether visual differences in module scores reach **statistical significance**. Since expression data do not necessarily fall into any distribution (normal or non-normal), it is recommended to use a non-parametric test (https://github.com/satijalab/seurat/issues/3406). To this end, we use a **Kruskal-Wallis test** (medians) followed by a **Dunn test** (mean rank) with **Benjamini-Hochberg correction** for multiple testing (α = 0.05) or **Wilcoxon rank sum test** (sum rank) (https://stats.stackexchange.com/questions/355990/is-dunn-test-for-two-samples-equivalent-to-wilcox-test).
+
+
+## 3.1 Microglia
+
+
+### 3.1.1 Homeostatic 1
+
+Miedema et al. (2022).
+
+```{r, fig.dim = c(10, 7)}
+
+Homeostatic1 <- list(c("CX3CR1", "IRF8", "P2RY12", "TMEM119"))
+Seurat <- AddModuleScore(Seurat, features = Homeostatic1, name = "Homeostatic1") # Homeostatic11 in metadata
+
+FeaturePlot(Seurat, features = "Homeostatic11", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Homeostatic1_Data <- FetchData(Seurat, vars = c("clusters", "Homeostatic11"))
+colnames(Homeostatic1_Data) <- c("Cluster", "Module score")
+
+ggplot(Homeostatic1_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Homeostatic1_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = Homeostatic1_Data)
+dunnTest(`Module score` ~ Cluster, data = Homeostatic1_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Homeostatic1_Data$`Module score`)
+Homeostatic1_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Homeostatic1_Data$Group <- ifelse(Homeostatic1_Data$Cluster %!in% c("MG1", "MG2"), "Combined", as.character(Homeostatic1_Data$Cluster))
+Homeostatic1_Data$Group <- factor(Homeostatic1_Data$Group, levels = c("MG1", "MG2", "Combined"))
+ggplot(Homeostatic1_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Homeostatic1_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Homeostatic1_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#52677A", "#6687A3", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = Homeostatic1_Data)
+dunnTest(`Module score` ~ Group, data = Homeostatic1_Data, method = "bh")
+```
+
+
+### 3.1.2 Proinflammatory
+
+Miedema et al. (2022).
+
+```{r, fig.dim = c(10, 7)}
+
+Proinflammatory <- list(c("CCL3", "IL1B", "NFKBIA", "CD83", "CDKN1A"))
+Seurat <- AddModuleScore(Seurat, features = Proinflammatory, name = "Proinflammatory") # Proinflammatory1 in metadata
+
+FeaturePlot(Seurat, features = "Proinflammatory1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Proinflammatory_Data <- FetchData(Seurat, vars = c("clusters", "Proinflammatory1"))
+colnames(Proinflammatory_Data) <- c("Cluster", "Module score")
+
+ggplot(Proinflammatory_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Proinflammatory_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = Proinflammatory_Data)
+dunnTest(`Module score` ~ Cluster, data = Proinflammatory_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Proinflammatory_Data$`Module score`)
+Proinflammatory_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Proinflammatory_Data$Group <- ifelse(Proinflammatory_Data$Cluster %!in% c("MG5", "MG6", "MG8", "MG9"), "Combined", as.character(Proinflammatory_Data$Cluster))
+Proinflammatory_Data$Group <- factor(Proinflammatory_Data$Group, levels = c("MG5", "MG6", "MG8", "MG9", "Combined"))
+ggplot(Proinflammatory_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Proinflammatory_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Proinflammatory_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#6AB47C", "#90BE6D", "#F9C74F", "#F8961E", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = Proinflammatory_Data)
+dunnTest(`Module score` ~ Group, data = Proinflammatory_Data, method = "bh")
+```
+
+
+### 3.1.3 Activated/phagocytic
+
+Miedema et al. (2022).
+
+```{r, fig.dim = c(10, 7)}
+
+ActivatedPhagocytic <- list(c("FTL", "SPP1", "APOE", "ASAH1", "LGALS1", "GPNMB", "LPL", "VIM", "FTH1"))
+Seurat <- AddModuleScore(Seurat, features = ActivatedPhagocytic, name = "ActivatedPhagocytic") # ActivatedPhagocytic1 in metadata
+
+FeaturePlot(Seurat, features = "ActivatedPhagocytic1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+ActivatedPhagocytic_Data <- FetchData(Seurat, vars = c("clusters", "ActivatedPhagocytic1"))
+colnames(ActivatedPhagocytic_Data) <- c("Cluster", "Module score")
+
+ggplot(ActivatedPhagocytic_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(ActivatedPhagocytic_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = ActivatedPhagocytic_Data)
+dunnTest(`Module score` ~ Cluster, data = ActivatedPhagocytic_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(ActivatedPhagocytic_Data$`Module score`)
+ActivatedPhagocytic_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+ActivatedPhagocytic_Data$Group <- ifelse(ActivatedPhagocytic_Data$Cluster %!in% c("MG4", "MG5", "MG6", "MG7"), "Combined", as.character(ActivatedPhagocytic_Data$Cluster))
+ActivatedPhagocytic_Data$Group <- factor(ActivatedPhagocytic_Data$Group, levels = c("MG4", "MG5", "MG6", "MG7", "Combined"))
+ggplot(ActivatedPhagocytic_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(ActivatedPhagocytic_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(ActivatedPhagocytic_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#43AA8B", "#6AB47C", "#90BE6D", "#C5C35E", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = ActivatedPhagocytic_Data)
+dunnTest(`Module score` ~ Group, data = ActivatedPhagocytic_Data, method = "bh")
+```
+
+
+### 3.1.4 Homeostatic 2
+
+Masuda et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+Homeostatic2 <- list(c("TMEM119", "P2RY13", "CX3CR1", "SLC2A5", "P2RY12", "CST3"))
+Seurat <- AddModuleScore(Seurat, features = Homeostatic2, name = "Homeostatic2") # Homeostatic21 in metadata
+
+FeaturePlot(Seurat, features = "Homeostatic21", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Homeostatic2_Data <- FetchData(Seurat, vars = c("clusters", "Homeostatic21"))
+colnames(Homeostatic2_Data) <- c("Cluster", "Module score")
+
+ggplot(Homeostatic2_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Homeostatic2_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = Homeostatic2_Data)
+dunnTest(`Module score` ~ Cluster, data = Homeostatic2_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Homeostatic2_Data$`Module score`)
+Homeostatic2_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Homeostatic2_Data$Group <- ifelse(Homeostatic2_Data$Cluster %!in% c("MG1", "MG2"), "Combined", as.character(Homeostatic2_Data$Cluster))
+Homeostatic2_Data$Group <- factor(Homeostatic2_Data$Group, levels = c("MG1", "MG2", "Combined"))
+ggplot(Homeostatic2_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Homeostatic2_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Homeostatic2_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#52677A", "#6687A3", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = Homeostatic2_Data)
+dunnTest(`Module score` ~ Group, data = Homeostatic2_Data, method = "bh")
+```
+
+
+### 3.1.5 Preactivated
+
+Masuda et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+Preactivated <- list(c("CCL2", "EGR2", "CCL4", "CD83", "EGR3"))
+Seurat <- AddModuleScore(Seurat, features = Preactivated, name = "Preactivated") # Preactivated1 in metadata
+
+FeaturePlot(Seurat, features = "Preactivated1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Preactivated_Data <- FetchData(Seurat, vars = c("clusters", "Preactivated1"))
+colnames(Preactivated_Data) <- c("Cluster", "Module score")
+
+ggplot(Preactivated_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Preactivated_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = Preactivated_Data)
+dunnTest(`Module score` ~ Cluster, data = Preactivated_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Preactivated_Data$`Module score`)
+Preactivated_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Preactivated_Data$Group <- ifelse(Preactivated_Data$Cluster %!in% c("MG5", "MG6", "MG8", "MG9"), "Combined", as.character(Preactivated_Data$Cluster))
+Preactivated_Data$Group <- factor(Preactivated_Data$Group, levels = c("MG5", "MG6", "MG8", "MG9", "Combined"))
+ggplot(Preactivated_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Preactivated_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Preactivated_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#6AB47C", "#90BE6D", "#F9C74F", "#F8961E", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = Preactivated_Data)
+dunnTest(`Module score` ~ Group, data = Preactivated_Data, method = "bh")
+```
+
+
+### 3.1.6 MS-associated
+
+Masuda et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+MSAssociated <- list(c("CTSD", "APOC1", "GPNMB", "ANXA2", "LGALS1"))
+Seurat <- AddModuleScore(Seurat, features = MSAssociated, name = "MSAssociated") # MSAssociated1 in metadata
+
+FeaturePlot(Seurat, features = "MSAssociated1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+ggsave("FeaturePlot MS-associated.png", height = 5, width = 6, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+MSAssociated_Data <- FetchData(Seurat, vars = c("clusters", "MSAssociated1"))
+colnames(MSAssociated_Data) <- c("Cluster", "Module score")
+
+ggplot(MSAssociated_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(MSAssociated_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+ggsave("Boxplot MS-associated 1.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Cluster, data = MSAssociated_Data)
+dunnTest(`Module score` ~ Cluster, data = MSAssociated_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(MSAssociated_Data$`Module score`)
+MSAssociated_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+MSAssociated_Data$Group <- ifelse(MSAssociated_Data$Cluster %!in% c("MG4", "MG5", "MG6", "MG7"), "Combined", as.character(MSAssociated_Data$Cluster))
+MSAssociated_Data$Group <- factor(MSAssociated_Data$Group, levels = c("MG4", "MG5", "MG6", "MG7", "Combined"))
+ggplot(MSAssociated_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(MSAssociated_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(MSAssociated_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#43AA8B", "#6AB47C", "#90BE6D", "#C5C35E", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), axis.title.x = element_blank(), axis.text.x = element_blank(), axis.line.x = element_blank(), axis.ticks.x = element_blank(), text = element_text(family = "Myriad Pro Regular"), axis.title.y = element_text(size = 20), axis.text.y = element_text(size = 20), axis.line.y = element_line(linewidth = 1))
+ggsave("Boxplot MS-associated 2.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Group, data = MSAssociated_Data)
+dunnTest(`Module score` ~ Group, data = MSAssociated_Data, method = "bh")
+```
+
+
+### 3.1.7 MS-enriched 1
+
+Masuda et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+MSEnriched1 <- list(c("CD74", "HLA-DRA", "HLA-DRB1", "HLA-DPB1", "LYZ"))
+Seurat <- AddModuleScore(Seurat, features = MSEnriched1, name = "MSEnriched1") # MSEnriched11 in metadata
+
+FeaturePlot(Seurat, features = "MSEnriched11", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+MSEnriched1_Data <- FetchData(Seurat, vars = c("clusters", "MSEnriched11"))
+colnames(MSEnriched1_Data) <- c("Cluster", "Module score")
+
+ggplot(MSEnriched1_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(MSEnriched1_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = MSEnriched1_Data)
+dunnTest(`Module score` ~ Cluster, data = MSEnriched1_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(MSEnriched1_Data$`Module score`)
+MSEnriched1_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+MSEnriched1_Data$Group <- ifelse(MSEnriched1_Data$Cluster %!in% c("MMC"), "Combined", as.character(MSEnriched1_Data$Cluster))
+MSEnriched1_Data$Group <- factor(MSEnriched1_Data$Group, levels = c("MMC", "Combined"))
+ggplot(MSEnriched1_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(MSEnriched1_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(MSEnriched1_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#835D7A", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = MSEnriched1_Data)
+wilcox.test(`Module score` ~ Group, data = MSEnriched1_Data, paired = FALSE, exact = FALSE, correct = FALSE)
+```
+
+
+### 3.1.8 MS-enriched 2
+
+Masuda et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+MSEnriched2 <- list(c("SPP1", "PADI2", "LPL", "CPM", "LIPA"))
+Seurat <- AddModuleScore(Seurat, features = MSEnriched2, name = "MSEnriched2") # MSEnriched21 in metadata
+
+FeaturePlot(Seurat, features = "MSEnriched21", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+MSEnriched2_Data <- FetchData(Seurat, vars = c("clusters", "MSEnriched21"))
+colnames(MSEnriched2_Data) <- c("Cluster", "Module score")
+
+ggplot(MSEnriched2_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(MSEnriched2_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = MSEnriched2_Data)
+dunnTest(`Module score` ~ Cluster, data = MSEnriched2_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(MSEnriched2_Data$`Module score`)
+MSEnriched2_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+MSEnriched2_Data$Group <- ifelse(MSEnriched2_Data$Cluster %!in% c("MG4", "MG5", "MG6"), "Combined", as.character(MSEnriched2_Data$Cluster))
+MSEnriched2_Data$Group <- factor(MSEnriched2_Data$Group, levels = c("MG4", "MG5", "MG6", "Combined"))
+ggplot(MSEnriched2_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(MSEnriched2_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(MSEnriched2_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#43AA8B", "#6AB47C", "#90BE6D", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = MSEnriched2_Data)
+dunnTest(`Module score` ~ Group, data = MSEnriched2_Data, method = "bh")
+```
+
+
+### 3.1.9 Homeostatic 3
+
+Schirmer et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+Homeostatic3 <- list(c("P2RY12", "RUNX1", "CSF1R"))
+Seurat <- AddModuleScore(Seurat, features = Homeostatic3, name = "Homeostatic3") # Homeostatic31 in metadata
+
+FeaturePlot(Seurat, features = "Homeostatic31", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Homeostatic3_Data <- FetchData(Seurat, vars = c("clusters", "Homeostatic31"))
+colnames(Homeostatic3_Data) <- c("Cluster", "Module score")
+
+ggplot(Homeostatic3_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Homeostatic3_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = Homeostatic3_Data)
+dunnTest(`Module score` ~ Cluster, data = Homeostatic3_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Homeostatic3_Data$`Module score`)
+Homeostatic3_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Homeostatic3_Data$Group <- ifelse(Homeostatic3_Data$Cluster %!in% c("MG1", "MG2", "MG3"), "Combined", as.character(Homeostatic3_Data$Cluster))
+Homeostatic3_Data$Group <- factor(Homeostatic3_Data$Group, levels = c("MG1", "MG2", "MG3", "Combined"))
+ggplot(Homeostatic3_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Homeostatic3_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Homeostatic3_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#52677A", "#6687A3", "#4D908E", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = Homeostatic3_Data)
+dunnTest(`Module score` ~ Group, data = Homeostatic3_Data, method = "bh")
+```
+
+
+### 3.1.10 MS-specific/activated
+
+Schirmer et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+MSSpecificActivated <- list(c("ASAH1", "ACSL1", "DPYD", "CD68", "CD74", "FTL", "APOE", "SPP1"))
+Seurat <- AddModuleScore(Seurat, features = MSSpecificActivated, name = "MSSpecificActivated") # MSSpecificActivated1 in metadata
+
+FeaturePlot(Seurat, features = "MSSpecificActivated1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+MSSpecificActivated_Data <- FetchData(Seurat, vars = c("clusters", "MSSpecificActivated1"))
+colnames(MSSpecificActivated_Data) <- c("Cluster", "Module score")
+
+ggplot(MSSpecificActivated_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(MSSpecificActivated_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = MSSpecificActivated_Data)
+dunnTest(`Module score` ~ Cluster, data = MSSpecificActivated_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(MSSpecificActivated_Data$`Module score`)
+MSSpecificActivated_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+MSSpecificActivated_Data$Group <- ifelse(MSSpecificActivated_Data$Cluster %!in% c("MG5", "MG6"), "Combined", as.character(MSSpecificActivated_Data$Cluster))
+MSSpecificActivated_Data$Group <- factor(MSSpecificActivated_Data$Group, levels = c("MG5", "MG6", "Combined"))
+ggplot(MSSpecificActivated_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(MSSpecificActivated_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(MSSpecificActivated_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#6AB47C", "#90BE6D", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = MSSpecificActivated_Data)
+dunnTest(`Module score` ~ Group, data = MSSpecificActivated_Data, method = "bh")
+```
+
+
+### 3.1.11 Phagocytic
+
+Schirmer et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+Phagocytic <- list(c("CD163", "PLP1", "MBP", "ST18"))
+Seurat <- AddModuleScore(Seurat, features = Phagocytic, name = "Phagocytic") # Phagocytic1 in metadata
+
+FeaturePlot(Seurat, features = "Phagocytic1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Phagocytic_Data <- FetchData(Seurat, vars = c("clusters", "Phagocytic1"))
+colnames(Phagocytic_Data) <- c("Cluster", "Module score")
+
+ggplot(Phagocytic_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Phagocytic_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = Phagocytic_Data)
+dunnTest(`Module score` ~ Cluster, data = Phagocytic_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Phagocytic_Data$`Module score`)
+Phagocytic_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Phagocytic_Data$Group <- ifelse(Phagocytic_Data$Cluster %!in% c("CAM1", "CAM2"), "Combined", as.character(Phagocytic_Data$Cluster))
+Phagocytic_Data$Group <- factor(Phagocytic_Data$Group, levels = c("CAM1", "CAM2", "Combined"))
+ggplot(Phagocytic_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Phagocytic_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Phagocytic_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#F65A38", "#F94144", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = Phagocytic_Data)
+dunnTest(`Module score` ~ Group, data = Phagocytic_Data, method = "bh")
+```
+
+
+### 3.1.12 MIMS
+
+Absinta et al. (2021).
+
+```{r, fig.dim = c(10, 7)}
+
+MIMS <- list(c("TREM2", "APOE", "LPL", "CD68", "CD9", "CD74", "GRN", "TYROBP", "TIMP2", "SPP1", "CTSZ", "CTSB", "FTH1", "C1QA", "C1QB", "C1QC"))
+Seurat <- AddModuleScore(Seurat, features = MIMS, name = "MIMS") # MIMS1 in metadata
+
+FeaturePlot(Seurat, features = "MIMS1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+MIMS_Data <- FetchData(Seurat, vars = c("clusters", "MIMS1"))
+colnames(MIMS_Data) <- c("Cluster", "Module score")
+
+ggplot(MIMS_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(MIMS_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = MIMS_Data)
+dunnTest(`Module score` ~ Cluster, data = MIMS_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(MIMS_Data$`Module score`)
+MIMS_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+MIMS_Data$Group <- ifelse(MIMS_Data$Cluster %!in% c("MG5"), "Combined", as.character(MIMS_Data$Cluster))
+MIMS_Data$Group <- factor(MIMS_Data$Group, levels = c("MG5", "Combined"))
+ggplot(MIMS_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(MIMS_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(MIMS_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#6AB47C", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = MIMS_Data)
+wilcox.test(`Module score` ~ Group, data = MIMS_Data, paired = FALSE, exact = FALSE, correct = FALSE)
+```
+
+
+### 3.1.13 MIMS-foamy
+
+Absinta et al. (2021).
+
+```{r, fig.dim = c(10, 7)}
+
+MIMSFoamy <- list(c("MERTK", "LPL", "ABCA1", "PPARG", "MSR1", "IL18", "ITGAV", "APOE", "CD81", "LIPA", "ASAH1", "AP1B1", "CTSB", "PSAP", "PPT1", "CTSL", "TREM2", "NUPR1", "PLA2G7", "CEBPA", "PLD3", "SERPINE1", "HGF"))
+Seurat <- AddModuleScore(Seurat, features = MIMSFoamy, name = "MIMSFoamy") # MIMSFoamy1 in metadata
+
+FeaturePlot(Seurat, features = "MIMSFoamy1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+ggsave("FeaturePlot MIMS-foamy.png", height = 5, width = 6, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+MIMSFoamy_Data <- FetchData(Seurat, vars = c("clusters", "MIMSFoamy1"))
+colnames(MIMSFoamy_Data) <- c("Cluster", "Module score")
+
+ggplot(MIMSFoamy_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(MIMSFoamy_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+ggsave("Boxplot MIMS-foamy 1.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Cluster, data = MIMSFoamy_Data)
+dunnTest(`Module score` ~ Cluster, data = MIMSFoamy_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(MIMSFoamy_Data$`Module score`)
+MIMSFoamy_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+MIMSFoamy_Data$Group <- ifelse(MIMSFoamy_Data$Cluster %!in% c("MG4", "MG5", "MG6"), "Combined", as.character(MIMSFoamy_Data$Cluster))
+MIMSFoamy_Data$Group <- factor(MIMSFoamy_Data$Group, levels = c("MG4", "MG5", "MG6", "Combined"))
+ggplot(MIMSFoamy_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(MIMSFoamy_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(MIMSFoamy_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#43AA8B", "#6AB47C", "#90BE6D", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), axis.title.x = element_blank(), axis.text.x = element_blank(), axis.line.x = element_blank(), axis.ticks.x = element_blank(), text = element_text(family = "Myriad Pro Regular"), axis.title.y = element_text(size = 20), axis.text.y = element_text(size = 20), axis.line.y = element_line(linewidth = 1))
+ggsave("Boxplot MIMS-foamy 2.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Group, data = MIMSFoamy_Data)
+dunnTest(`Module score` ~ Group, data = MIMSFoamy_Data, method = "bh")
+```
+
+
+### 3.1.14 MIMS-iron
+
+Absinta et al. (2021).
+
+```{r, fig.dim = c(10, 7)}
+
+MIMSIron <- list(c("HLA-DRA", "HLA-DPA1", "CD74", "FTL", "FTH1", "FCGRT", "FCGR2A", "FCGR3A", "C1QA", "C1QB", "IL1B", "SOD1"))
+Seurat <- AddModuleScore(Seurat, features = MIMSIron, name = "MIMSIron") # MIMSIron1 in metadata
+
+FeaturePlot(Seurat, features = "MIMSIron1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+MIMSIron_Data <- FetchData(Seurat, vars = c("clusters", "MIMSIron1"))
+colnames(MIMSIron_Data) <- c("Cluster", "Module score")
+
+ggplot(MIMSIron_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(MIMSIron_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = MIMSIron_Data)
+dunnTest(`Module score` ~ Cluster, data = MIMSIron_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(MIMSIron_Data$`Module score`)
+MIMSIron_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+MIMSIron_Data$Group <- ifelse(MIMSIron_Data$Cluster %!in% c("CAM1", "MMC"), "Combined", as.character(MIMSIron_Data$Cluster))
+MIMSIron_Data$Group <- factor(MIMSIron_Data$Group, levels = c("CAM1", "MMC", "Combined"))
+ggplot(MIMSIron_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(MIMSIron_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(MIMSIron_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#F65A38", "#835D7A", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = MIMSIron_Data)
+dunnTest(`Module score` ~ Group, data = MIMSIron_Data, method = "bh")
+```
+
+
+## 3.2 Macrophages
+
+
+### 3.2.1 CAM
+
+Miedema et al. (2022).
+
+```{r, fig.dim = c(10, 7)}
+
+CAM <- list(c("F13A1", "LYVE1", "CD163", "CLEC4E"))
+Seurat <- AddModuleScore(Seurat, features = CAM, name = "CAM") # CAM1 in metadata
+
+FeaturePlot(Seurat, features = "CAM1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+CAM_Data <- FetchData(Seurat, vars = c("clusters", "CAM1"))
+colnames(CAM_Data) <- c("Cluster", "Module score")
+
+ggplot(CAM_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(CAM_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = CAM_Data)
+dunnTest(`Module score` ~ Cluster, data = CAM_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(CAM_Data$`Module score`)
+CAM_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+CAM_Data$Group <- ifelse(CAM_Data$Cluster %!in% c("CAM1", "CAM2"), "Combined", as.character(CAM_Data$Cluster))
+CAM_Data$Group <- factor(CAM_Data$Group, levels = c("CAM1", "CAM2", "Combined"))
+ggplot(CAM_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(CAM_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(CAM_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#F65A38", "#F94144", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = CAM_Data)
+dunnTest(`Module score` ~ Group, data = CAM_Data, method = "bh")
+```
+
+
+### 3.2.2 BAM
+
+Ostkamp et al. (2022).
+
+```{r, fig.dim = c(10, 7)}
+
+BAM <- list(c("APOE", "MS4A7", "MS4A6A", "LYZ", "CLEC4A", "IFITM2", "TGFBI", "CYBB", "MNDA", "IFI27L2", "PF4", "MSR1", "AOAH", "DAB2", "LYVE1"))
+Seurat <- AddModuleScore(Seurat, features = BAM, name = "BAM") # BAM1 in metadata
+
+FeaturePlot(Seurat, features = "BAM1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+BAM_Data <- FetchData(Seurat, vars = c("clusters", "BAM1"))
+colnames(BAM_Data) <- c("Cluster", "Module score")
+
+ggplot(BAM_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(BAM_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = BAM_Data)
+dunnTest(`Module score` ~ Cluster, data = BAM_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(BAM_Data$`Module score`)
+BAM_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+BAM_Data$Group <- ifelse(BAM_Data$Cluster %!in% c("MON", "CAM1", "CAM2", "MMC"), "Combined", as.character(BAM_Data$Cluster))
+BAM_Data$Group <- factor(BAM_Data$Group, levels = c("MON", "CAM1", "CAM2", "MMC", "Combined"))
+ggplot(BAM_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(BAM_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(BAM_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#F3722C", "#F65A38", "#F94144", "#835D7A", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = BAM_Data)
+dunnTest(`Module score` ~ Group, data = BAM_Data, method = "bh")
+```
+
+
+### 3.2.3 MRC1 BAM
+
+Ostkamp et al. (2022).
+
+```{r, fig.dim = c(10, 7)}
+
+MRC1BAM <- list(c("CD163", "FOLR2", "CCL8"))
+Seurat <- AddModuleScore(Seurat, features = MRC1BAM, name = "MRC1BAM") # MRC1BAM1 in metadata
+
+FeaturePlot(Seurat, features = "MRC1BAM1", pt.size = 1, order = TRUE) +
+  scale_color_viridis() +
+  labs(title = NULL)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+MRC1BAM_Data <- FetchData(Seurat, vars = c("clusters", "MRC1BAM1"))
+colnames(MRC1BAM_Data) <- c("Cluster", "Module score")
+
+ggplot(MRC1BAM_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(MRC1BAM_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+kruskal.test(`Module score` ~ Cluster, data = MRC1BAM_Data)
+dunnTest(`Module score` ~ Cluster, data = MRC1BAM_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(MRC1BAM_Data$`Module score`)
+MRC1BAM_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+MRC1BAM_Data$Group <- ifelse(MRC1BAM_Data$Cluster %!in% c("CAM1", "CAM2"), "Combined", as.character(MRC1BAM_Data$Cluster))
+MRC1BAM_Data$Group <- factor(MRC1BAM_Data$Group, levels = c("CAM1", "CAM2", "Combined"))
+ggplot(MRC1BAM_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(MRC1BAM_Data, !Group %in% "Combined"), outlier.shape = NA) +
+  geom_boxplot(data = subset(MRC1BAM_Data, Group %in% "Combined"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#F65A38", "#F94144", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+kruskal.test(`Module score` ~ Group, data = MRC1BAM_Data)
+dunnTest(`Module score` ~ Group, data = MRC1BAM_Data, method = "bh")
+```
+
+
+## 3.3 Heat maps
+
+To plot the different modules in a singular heat map, we add the module score information stored in the metadata as a new **assay** (Module.scores) to the Seurat object. For each cluster the module scores were **averaged** for all cells within that cluster (https://github.com/satijalab/seurat/issues/3366). We **scaled** the scores for each module to optimize visualization (some modules with smaller differences between clusters were not readily visible next to modules with larger differences between clusters); therefore the color gradient can not be compared across modules, but only within a module.
+
+```{r, fig.dim = c(10, 7)}
+
+Seurat[["Module.scores"]] <- CreateAssayObject(t(FetchData(Seurat, vars = c("Homeostatic11", "Homeostatic21", "Homeostatic31", "ActivatedPhagocytic1", "MSAssociated1", "MSEnriched21", "MSSpecificActivated1", "MIMS1", "MIMSFoamy1", "MIMSIron1", "Proinflammatory1", "Preactivated1", "Phagocytic1", "CAM1", "BAM1", "MRC1BAM1", "MSEnriched11"))))
+Averaged_Seurat <- AverageExpression(Seurat, return.seurat = TRUE, assays = "Module.scores")
+
+ModuleScores <- GetAssayData(Averaged_Seurat, assay = "Module.scores")
+ModuleScores <- t(scale(t(ModuleScores)))
+rownames(ModuleScores) <- c("Homeostatic 1; Miedema et al. (2022)", "Homeostatic 2; Masuda et al. (2019)", "Homeostatic 3; Schirmer et al. (2019)", "Activated/phagocytic; Miedema et al. (2022)", "MS-associated; Masuda et al. (2019)", "MS-enriched 2; Masuda et al. (2019)", "MS-specific activated; Schirmer et al. (2019)", "MIMS; Absinta et al. (2021)", "MIMS-foamy; Absinta et al. (2021)", "MIMS-iron; Absinta et al. (2021)", "Proinflammatory; Miedema et al. (2022)", "Preactivated; Masuda et al. (2019)", "Phagocytic; Schirmer et al. (2019)", "CAM; Miedema et al. (2022)", "BAM; Ostkamp et al. (2022)", "MRC1 BAM; Ostkamp et al. (2022)", "MS-enriched 1; Masuda et al. (2019)")
+HA <- HeatmapAnnotation(Clusters = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"), col = list(Clusters = c("MG1" = "#52677A", "MG2" = "#6687A3", "MG3" = "#4D908E", "MG4" = "#43AA8B", "MG5" = "#6AB47C", "MG6" = "#90BE6D", "MG7" = "#C5C35E", "MG8" = "#F9C74F", "MG9" = "#F8961E", "MON" = "#F3722C", "CAM1" = "#F65A38", "CAM2" = "#F94144", "MMC" = "#835D7A")), show_legend = FALSE, show_annotation_name = FALSE)
+Heatmap <- Heatmap(ModuleScores, col = viridis(100), name = "Module score", cluster_rows = FALSE, cluster_columns = FALSE, row_order = rev(rownames(ModuleScores)), column_order = colnames(ModuleScores), row_names_side = "left", row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10), bottom_annotation = HA, row_split = data.frame(rep(c("E", "D", "C", "B", "A"), c(3, 7, 2, 4, 1))))
+Heatmap
+png("Heatmap.png", height = 5, width = 7, units = "in", res = 300)
+plot(Heatmap)
+dev.off()
+```
+
+
+# 4. The curious case of cluster 6
+
+Microglia or myeloid dendritic cells (MMC)? Or mixed?
+
+```{r, fig.dim = c(10, 7)}
+
+Seurat@active.ident <- Seurat$SCT_snn_res.0.3
+Cluster_6 <- subset(Seurat, idents = "6")
+UMAPPlot(Cluster_6, cols = "#835D7A", pt.size = 1, label = TRUE) + NoLegend()
+UMAPPlot(Cluster_6, cols = "#835D7A", pt.size = 1, split.by = "tissue", label = TRUE) + NoLegend()
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Cluster_6@active.ident <- as.factor(Cluster_6$tissue)
+FindMarkers(Cluster_6, logfc.threshold = 0.322, min.pct = 0.25, verbose = FALSE, only.pos = TRUE, ident.1 = "CSF", ident.2 = "Brain") %>%
+  slice_max(avg_log2FC, n = 30)
+FindMarkers(Cluster_6, logfc.threshold = 0.322, min.pct = 0.25, verbose = FALSE, only.pos = TRUE, ident.1 = "Brain", ident.2 = "CSF") %>%
+  slice_max(avg_log2FC, n = 30)
+```
+
+**Mixed myeloid cells or MMC:**
+
+- Distribution CSF and brain cells: CSF cells more at the bottom; Brain cells more towards the top.
+
+- Differential gene expression: CSF cells mDC phenotype; Brain cells microglia phenotype. Confirmed in FeaturePlots.
+
+*Reason*:
+
+Module "MS-enriched 1" from Masuda et al. (2019) is predominantly present in cluster 6. In the original article from Masuda et al. (2019) "MS-enriched" cells were described as reminiscent of remyelination-associated microglia in mice, with downregulation of microglial core genes and increased expression of MHC class II-related genes. This may result in a microglia phenotype similar to a mDC phenotype and might explain why remyelination-associated microglia and mDC cluster together/are integrated together.
+
+```{r, fig.dim = c(10, 7)}
+sessionInfo()
+```

@@ -1,0 +1,589 @@
+---
+title: "Integration of CSF and CNS datasets with Harmony"
+author: "Stijn Swinnen and Jarne Beliën"
+date: "26-04-2023"
+output:
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+*Laboratory for Neuroimmunology; University of Leuven*
+
+
+**Based on (for the most part):**
+
+- [Single-cell best practices](https://www.sc-best-practices.org/preamble.html) 
+
+- [GitHub: Harmony](https://portals.broadinstitute.org/harmony/articles/quickstart.html)
+
+- [Harvard Chan Bioinformatics Core (HBC)](https://hbctraining.github.io/scRNA-seq_online/lessons/06a_integration_harmony.html)
+
+
+*References to specific sources (e.g., articles and GitHub community pages) are provided in this script.*
+
+
+**Required packages (in alphabetical order):**
+
+```{r setup, Print Options}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+
+```{r setup, Libraries}
+
+library(celldex)
+library(clustree)
+library(cowplot)
+library(data.table)
+library(plyr) # Needs to be loaded before dplyr
+library(dplyr)
+library(foreach)
+library(ggplot2)
+library(harmony)
+library(pdfCluster)
+library(purrr)
+library(RColorBrewer)
+library(scDblFinder)
+library(Seurat)
+library(SingleCellExperiment)
+library(SingleR)
+library(SoupX)
+library(stringr)
+library(tibble)
+library(tidyr)
+
+setwd("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/2. Integration")
+```
+
+
+# 1. Loading in the data
+
+```{r, fig.dim = c(10, 7)}
+
+CSF <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/1. Quality control/CSF/CSF.rds")
+CSF[["orig.object"]] <- "CSF"
+DefaultAssay(CSF)
+summary(CSF@meta.data)
+UMAPPlot(CSF, label = TRUE)
+
+CNS_1 <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/1. Quality control/CNS/Schirmer et al. (2019)/CNS_1.rds")
+CNS_1[["orig.object"]] <- "CNS_1"
+DefaultAssay(CNS_1)
+summary(CNS_1@meta.data)
+UMAPPlot(CNS_1, label = TRUE)
+
+CNS_2 <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/1. Quality control/CNS/Absinta et al. (2021)/CNS_2.rds")
+CNS_2[["orig.object"]] <- "CNS_2"
+DefaultAssay(CNS_2)
+summary(CNS_2@meta.data)
+UMAPPlot(CNS_2, label = TRUE)
+
+CNS_3 <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/1. Quality control/CNS/Miedema et al. (2022)/CNS_3.rds")
+CNS_3[["orig.object"]] <- "CNS_3"
+DefaultAssay(CNS_3)
+summary(CNS_3@meta.data)
+UMAPPlot(CNS_3, label = TRUE)
+
+CNS_4 <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/1. Quality control/CNS/Trobisch et al. (2022)/CNS_4.rds")
+CNS_4[["orig.object"]] <- "CNS_4"
+DefaultAssay(CNS_4)
+summary(CNS_4@meta.data)
+UMAPPlot(CNS_4, label = TRUE)
+
+
+CSF <- subset(CSF, idents = c("5", "12", "15"))
+UMAPPlot(CSF, label = TRUE)
+
+CNS_1 <- subset(CNS_1, idents = "4")
+UMAPPlot(CNS_1, label = TRUE)
+
+CNS_2 <- subset(CNS_2, idents = "4")
+UMAPPlot(CNS_2, label = TRUE)
+
+#CNS_3 = Miedema: myeloid clusters = all cells
+
+CNS_4 <- subset(CNS_4, idents = "6")
+UMAPPlot(CNS_4, label = TRUE)
+```
+
+Based on this [GitHub thread](https://github.com/satijalab/seurat/issues/1883) and this [lesson](https://github.com/hbctraining/scRNA-seq_online/blob/master/lessons/seurat_subclustering.md) from the Harvard Chan Bioinformatics Core, we chose to start over with the raw counts for this subset of cells (RNA assay) and run *SCTransform* again to determine the greatest sources of variation present whithin the myeloid cells only.
+
+
+# 2. Data normalization and variance stabilization with *SCTransform*
+
+*Reference SCTransform: Hafemeister and Satija (2019). Normalization and variance stabilization of single-cell RNA-seq data using regularized negative binomial regression. Genome Biology.*
+
+*SCTransform* is beneficial to find **"rare" (low-frequency) cell populations**. In comparison to *NormalizeData*, *SCTransform* is less susceptible to technical noise and therefore allows more variable features (genes; 2,000 -> 3,000) and more PCs. In addition, we **regress out** (not remove) the percentage of mtRNA (common practice) and the difference between the expression of S and G2M genes (difference between cycling and non-cycling cells remains).
+
+- *SCTransform*. *NormalizeData*, *FindVariableFeatures* and *ScaleData* in one optimized function; "CSF@assays$SCT". Default assay = "RNA". Default residual.features = NULL (all genes). Default variable.features.n = 3,000.
+
+```{r, fig.dim = c(10, 7)}
+
+CSF <- SCTransform(CSF, vars.to.regress = c("percent.mt", "cc.difference"), verbose = FALSE)
+CNS_1 <- SCTransform(CNS_1, vars.to.regress = c("percent.mt", "cc.difference"), verbose = FALSE)
+CNS_2 <- SCTransform(CNS_2, vars.to.regress = c("percent.mt", "cc.difference"), verbose = FALSE)
+CNS_3 <- SCTransform(CNS_3, vars.to.regress = c("percent.mt", "cc.difference"), verbose = FALSE)
+CNS_4 <- SCTransform(CNS_4, vars.to.regress = c("percent.mt", "cc.difference"), verbose = FALSE)
+```
+
+Output = **Seurat objects** with new **SCT** assay and slots **counts** (corrected; reverse-transformed from Pearson residuals in scale.data and sequence-depth corrected), **data** (corrected; log-normalized counts) and **scale.data** (Pearson residuals).
+
+
+# 3. Integration of myeloid cells from all datasets with *Harmony*
+
+*Reference Harmony: Korsunsky et al (2019). Fast, sensitive and accurate integration of single-cell data with Harmony. Nature Methods.*
+
+We specify that we used **SCTransform** with 3,000 variable features (genes).
+
+- *SelectIntegrationFeatures*. Default nfeatures = 2,000.
+
+- *RunPCA*. Default features = NULL (variable features). Default npcs (number of PCs) = 50.
+
+Harmony integration transforms principal components (PCs) and seeks clusters with maximum "diversity" based on k-means, i.e. whether each cluster contains balanced amounts of cells from each batch (e.g., donor, condition, tissue,...). Harmony tries to correct the imbalance or **batch effects**. To do so, a merged and normalized Seurat object with defined variable features and PCs is required (https://hbctraining.github.io/scRNA-seq_online/lessons/06a_integration_harmony.html).
+
+-> Benchmarked in *Tran et al. (2020). A benchmark of batch-effect correction methods for single-cell RNA-sequencing data. Genome Biology.* and *Luecken et al. (2022). Benchmarking atlas-level data integration in single-cell genomics. Nature Methods.*
+
+**We try to integrate based on (combinations of) different variables present in our metadata:**
+
+
+## 3.1 Variables: "orig.ident"
+
+```{r, fig.dim = c(10, 7)}
+
+Dataset_list <- list(CSF, CNS_1, CNS_2, CNS_3, CNS_4)
+
+Integration_Features <- SelectIntegrationFeatures(object.list = Dataset_list, nfeatures = 3000)
+Merged_seurat <- merge(Dataset_list[[1]], Dataset_list[2:length(Dataset_list)])
+DefaultAssay(Merged_seurat) <- "SCT"
+VariableFeatures(Merged_seurat) <- Integration_Features
+Merged_seurat <- RunPCA(Merged_seurat, assay = "SCT")
+
+Harmonized_seurat <- RunHarmony(Merged_seurat, group.by.vars = "orig.ident", reduction = "pca", assay.use = "SCT", reduction.save = "harmony")
+Harmonized_seurat@reductions
+DefaultDimReduc(Harmonized_seurat)
+DefaultAssay(Harmonized_seurat)
+```
+
+Output = batch-corrected **Seurat object** with additional reduction **harmony** (in addition to **pca**).
+
+We check the integration:
+
+```{r, fig.dim = c(10, 7)}
+
+ElbowPlot(Harmonized_seurat, ndims = 50, reduction = "harmony")
+Harmonized_seurat <- FindNeighbors(Harmonized_seurat, reduction = "harmony", dims = 1:30)
+Harmonized_seurat <- FindClusters(Harmonized_seurat)
+Harmonized_seurat <- RunUMAP(Harmonized_seurat, reduction = "harmony", dims = 1:30, verbose = FALSE)
+UMAPPlot(Harmonized_seurat, label = TRUE)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Harmonized_seurat, split.by = "orig.object")
+UMAPPlot(Harmonized_seurat, group.by = "orig.object")
+
+UMAPPlot(Harmonized_seurat, split.by = "sequencing.technique")
+UMAPPlot(Harmonized_seurat, group.by = "sequencing.technique")
+
+UMAPPlot(Harmonized_seurat, group.by = "orig.ident")
+
+UMAPPlot(Harmonized_seurat, group.by = "subject")
+
+UMAPPlot(Harmonized_seurat, split.by = "disease.course")
+UMAPPlot(Harmonized_seurat, group.by = "disease.course")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue")
+UMAPPlot(Harmonized_seurat, group.by = "tissue")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue.subtype")
+UMAPPlot(Harmonized_seurat, group.by = "tissue.subtype")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology")
+UMAPPlot(Harmonized_seurat, group.by = "pathology")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology.activity")
+UMAPPlot(Harmonized_seurat, group.by = "pathology.activity")
+```
+
+
+## 3.2 Variables: "orig.ident" + "orig.object" + "sequencing.technique"
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- RunHarmony(Merged_seurat, group.by.vars = c("orig.ident", "orig.object", "sequencing.technique"), reduction = "pca", assay.use = "SCT", reduction.save = "harmony", kmeans_init_nstart=20, kmeans_init_iter_max=100)
+Harmonized_seurat@reductions
+DefaultDimReduc(Harmonized_seurat)
+DefaultAssay(Harmonized_seurat)
+```
+
+Output = batch-corrected **Seurat object** with additional reduction **harmony** (in addition to **pca**).
+
+We check the integration:
+
+```{r, fig.dim = c(10, 7)}
+
+ElbowPlot(Harmonized_seurat, ndims = 50, reduction = "harmony")
+Harmonized_seurat <- FindNeighbors(Harmonized_seurat, reduction = "harmony", dims = 1:30)
+Harmonized_seurat <- FindClusters(Harmonized_seurat)
+Harmonized_seurat <- RunUMAP(Harmonized_seurat, reduction = "harmony", dims = 1:30, verbose = FALSE)
+UMAPPlot(Harmonized_seurat, label = TRUE)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Harmonized_seurat, split.by = "orig.object")
+UMAPPlot(Harmonized_seurat, group.by = "orig.object")
+
+UMAPPlot(Harmonized_seurat, split.by = "sequencing.technique")
+UMAPPlot(Harmonized_seurat, group.by = "sequencing.technique")
+
+UMAPPlot(Harmonized_seurat, group.by = "orig.ident")
+
+UMAPPlot(Harmonized_seurat, group.by = "subject")
+
+UMAPPlot(Harmonized_seurat, split.by = "disease.course")
+UMAPPlot(Harmonized_seurat, group.by = "disease.course")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue")
+UMAPPlot(Harmonized_seurat, group.by = "tissue")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue.subtype")
+UMAPPlot(Harmonized_seurat, group.by = "tissue.subtype")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology")
+UMAPPlot(Harmonized_seurat, group.by = "pathology")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology.activity")
+UMAPPlot(Harmonized_seurat, group.by = "pathology.activity")
+```
+
+
+## 3.3 Variables: "orig.object"
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- RunHarmony(Merged_seurat, group.by.vars = "orig.object", reduction = "pca", assay.use = "SCT", reduction.save = "harmony")
+Harmonized_seurat@reductions
+DefaultDimReduc(Harmonized_seurat)
+DefaultAssay(Harmonized_seurat)
+```
+
+Output = batch-corrected **Seurat object** with additional reduction **harmony** (in addition to **pca**).
+
+We check the integration:
+
+```{r, fig.dim = c(10, 7)}
+
+ElbowPlot(Harmonized_seurat, ndims = 50, reduction = "harmony")
+Harmonized_seurat <- FindNeighbors(Harmonized_seurat, reduction = "harmony", dims = 1:30)
+Harmonized_seurat <- FindClusters(Harmonized_seurat)
+Harmonized_seurat <- RunUMAP(Harmonized_seurat, reduction = "harmony", dims = 1:30, verbose = FALSE)
+UMAPPlot(Harmonized_seurat, label = TRUE)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Harmonized_seurat, split.by = "orig.object")
+UMAPPlot(Harmonized_seurat, group.by = "orig.object")
+
+UMAPPlot(Harmonized_seurat, split.by = "sequencing.technique")
+UMAPPlot(Harmonized_seurat, group.by = "sequencing.technique")
+
+UMAPPlot(Harmonized_seurat, group.by = "orig.ident")
+
+UMAPPlot(Harmonized_seurat, group.by = "subject")
+
+UMAPPlot(Harmonized_seurat, split.by = "disease.course")
+UMAPPlot(Harmonized_seurat, group.by = "disease.course")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue")
+UMAPPlot(Harmonized_seurat, group.by = "tissue")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue.subtype")
+UMAPPlot(Harmonized_seurat, group.by = "tissue.subtype")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology")
+UMAPPlot(Harmonized_seurat, group.by = "pathology")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology.activity")
+UMAPPlot(Harmonized_seurat, group.by = "pathology.activity")
+```
+
+
+## 3.4 Variables: "orig.object" + "sequencing.technique"
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- RunHarmony(Merged_seurat, group.by.vars = c("orig.object", "sequencing.technique"), reduction = "pca", assay.use = "SCT", reduction.save = "harmony", kmeans_init_nstart=20, kmeans_init_iter_max=100)
+Harmonized_seurat@reductions
+DefaultDimReduc(Harmonized_seurat)
+DefaultAssay(Harmonized_seurat)
+```
+
+Output = batch-corrected **Seurat object** with additional reduction **harmony** (in addition to **pca**).
+
+We check the integration:
+
+```{r, fig.dim = c(10, 7)}
+
+ElbowPlot(Harmonized_seurat, ndims = 50, reduction = "harmony")
+Harmonized_seurat <- FindNeighbors(Harmonized_seurat, reduction = "harmony", dims = 1:30)
+Harmonized_seurat <- FindClusters(Harmonized_seurat)
+Harmonized_seurat <- RunUMAP(Harmonized_seurat, reduction = "harmony", dims = 1:30, verbose = FALSE)
+UMAPPlot(Harmonized_seurat, label = TRUE)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Harmonized_seurat, split.by = "orig.object")
+UMAPPlot(Harmonized_seurat, group.by = "orig.object")
+
+UMAPPlot(Harmonized_seurat, split.by = "sequencing.technique")
+UMAPPlot(Harmonized_seurat, group.by = "sequencing.technique")
+
+UMAPPlot(Harmonized_seurat, group.by = "orig.ident")
+
+UMAPPlot(Harmonized_seurat, group.by = "subject")
+
+UMAPPlot(Harmonized_seurat, split.by = "disease.course")
+UMAPPlot(Harmonized_seurat, group.by = "disease.course")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue")
+UMAPPlot(Harmonized_seurat, group.by = "tissue")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue.subtype")
+UMAPPlot(Harmonized_seurat, group.by = "tissue.subtype")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology")
+UMAPPlot(Harmonized_seurat, group.by = "pathology")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology.activity")
+UMAPPlot(Harmonized_seurat, group.by = "pathology.activity")
+```
+
+
+## 3.5 Variables: "orig.ident" + "sequencing.technique"
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- RunHarmony(Merged_seurat, group.by.vars = c("orig.ident", "sequencing.technique"), reduction = "pca", assay.use = "SCT", reduction.save = "harmony", kmeans_init_nstart=20, kmeans_init_iter_max=100)
+Harmonized_seurat@reductions
+DefaultDimReduc(Harmonized_seurat)
+DefaultAssay(Harmonized_seurat)
+```
+
+Output = batch-corrected **Seurat object** with additional reduction **harmony** (in addition to **pca**).
+
+We check the integration:
+
+```{r, fig.dim = c(10, 7)}
+
+ElbowPlot(Harmonized_seurat, ndims = 50, reduction = "harmony")
+Harmonized_seurat <- FindNeighbors(Harmonized_seurat, reduction = "harmony", dims = 1:30)
+Harmonized_seurat <- FindClusters(Harmonized_seurat)
+Harmonized_seurat <- RunUMAP(Harmonized_seurat, reduction = "harmony", dims = 1:30, verbose = FALSE)
+UMAPPlot(Harmonized_seurat, label = TRUE)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Harmonized_seurat, split.by = "orig.object")
+UMAPPlot(Harmonized_seurat, group.by = "orig.object")
+
+UMAPPlot(Harmonized_seurat, split.by = "sequencing.technique")
+UMAPPlot(Harmonized_seurat, group.by = "sequencing.technique")
+
+UMAPPlot(Harmonized_seurat, group.by = "orig.ident")
+
+UMAPPlot(Harmonized_seurat, group.by = "subject")
+
+UMAPPlot(Harmonized_seurat, split.by = "disease.course")
+UMAPPlot(Harmonized_seurat, group.by = "disease.course")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue")
+UMAPPlot(Harmonized_seurat, group.by = "tissue")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue.subtype")
+UMAPPlot(Harmonized_seurat, group.by = "tissue.subtype")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology")
+UMAPPlot(Harmonized_seurat, group.by = "pathology")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology.activity")
+UMAPPlot(Harmonized_seurat, group.by = "pathology.activity")
+```
+
+
+## 3.6 Variables: "orig.ident" + "orig.object"
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- RunHarmony(Merged_seurat, group.by.vars = c("orig.ident", "orig.object"), reduction = "pca", assay.use = "SCT", reduction.save = "harmony", kmeans_init_nstart=20, kmeans_init_iter_max=100)
+Harmonized_seurat@reductions
+DefaultDimReduc(Harmonized_seurat)
+DefaultAssay(Harmonized_seurat)
+```
+
+Output = batch-corrected **Seurat object** with additional reduction **harmony** (in addition to **pca**).
+
+We check the integration:
+
+```{r, fig.dim = c(10, 7)}
+
+ElbowPlot(Harmonized_seurat, ndims = 50, reduction = "harmony")
+Harmonized_seurat <- FindNeighbors(Harmonized_seurat, reduction = "harmony", dims = 1:30)
+Harmonized_seurat <- FindClusters(Harmonized_seurat)
+Harmonized_seurat <- RunUMAP(Harmonized_seurat, reduction = "harmony", dims = 1:30, verbose = FALSE)
+UMAPPlot(Harmonized_seurat, label = TRUE)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Harmonized_seurat, split.by = "orig.object")
+UMAPPlot(Harmonized_seurat, group.by = "orig.object")
+
+UMAPPlot(Harmonized_seurat, split.by = "sequencing.technique")
+UMAPPlot(Harmonized_seurat, group.by = "sequencing.technique")
+
+UMAPPlot(Harmonized_seurat, group.by = "orig.ident")
+
+UMAPPlot(Harmonized_seurat, group.by = "subject")
+
+UMAPPlot(Harmonized_seurat, split.by = "disease.course")
+UMAPPlot(Harmonized_seurat, group.by = "disease.course")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue")
+UMAPPlot(Harmonized_seurat, group.by = "tissue")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue.subtype")
+UMAPPlot(Harmonized_seurat, group.by = "tissue.subtype")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology")
+UMAPPlot(Harmonized_seurat, group.by = "pathology")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology.activity")
+UMAPPlot(Harmonized_seurat, group.by = "pathology.activity")
+```
+
+
+## 3.7 Variables: "orig.ident" + "tissue"
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- RunHarmony(Merged_seurat, group.by.vars = c("orig.ident", "tissue"), reduction = "pca", assay.use = "SCT", reduction.save = "harmony", kmeans_init_nstart=20, kmeans_init_iter_max=100)
+Harmonized_seurat@reductions
+DefaultDimReduc(Harmonized_seurat)
+DefaultAssay(Harmonized_seurat)
+```
+
+Output = batch-corrected **Seurat object** with additional reduction **harmony** (in addition to **pca**).
+
+We check the integration:
+
+```{r, fig.dim = c(10, 7)}
+
+ElbowPlot(Harmonized_seurat, ndims = 50, reduction = "harmony")
+Harmonized_seurat <- FindNeighbors(Harmonized_seurat, reduction = "harmony", dims = 1:30)
+Harmonized_seurat <- FindClusters(Harmonized_seurat)
+Harmonized_seurat <- RunUMAP(Harmonized_seurat, reduction = "harmony", dims = 1:30, verbose = FALSE)
+UMAPPlot(Harmonized_seurat, label = TRUE)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Harmonized_seurat, split.by = "orig.object")
+UMAPPlot(Harmonized_seurat, group.by = "orig.object")
+
+UMAPPlot(Harmonized_seurat, split.by = "sequencing.technique")
+UMAPPlot(Harmonized_seurat, group.by = "sequencing.technique")
+
+UMAPPlot(Harmonized_seurat, group.by = "orig.ident")
+
+UMAPPlot(Harmonized_seurat, group.by = "subject")
+
+UMAPPlot(Harmonized_seurat, split.by = "disease.course")
+UMAPPlot(Harmonized_seurat, group.by = "disease.course")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue")
+UMAPPlot(Harmonized_seurat, group.by = "tissue")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue.subtype")
+UMAPPlot(Harmonized_seurat, group.by = "tissue.subtype")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology")
+UMAPPlot(Harmonized_seurat, group.by = "pathology")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology.activity")
+UMAPPlot(Harmonized_seurat, group.by = "pathology.activity")
+```
+
+
+## 3.8 Variables: "tissue"
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- RunHarmony(Merged_seurat, group.by.vars = "tissue", reduction = "pca", assay.use = "SCT", reduction.save = "harmony", kmeans_init_nstart=20, kmeans_init_iter_max=100)
+Harmonized_seurat@reductions
+DefaultDimReduc(Harmonized_seurat)
+DefaultAssay(Harmonized_seurat)
+```
+
+Output = batch-corrected **Seurat object** with additional reduction **harmony** (in addition to **pca**).
+
+We check the integration:
+
+```{r, fig.dim = c(10, 7)}
+
+ElbowPlot(Harmonized_seurat, ndims = 50, reduction = "harmony")
+Harmonized_seurat <- FindNeighbors(Harmonized_seurat, reduction = "harmony", dims = 1:30)
+Harmonized_seurat <- FindClusters(Harmonized_seurat)
+Harmonized_seurat <- RunUMAP(Harmonized_seurat, reduction = "harmony", dims = 1:30, verbose = FALSE)
+UMAPPlot(Harmonized_seurat, label = TRUE)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+UMAPPlot(Harmonized_seurat, split.by = "orig.object")
+UMAPPlot(Harmonized_seurat, group.by = "orig.object")
+
+UMAPPlot(Harmonized_seurat, split.by = "sequencing.technique")
+UMAPPlot(Harmonized_seurat, group.by = "sequencing.technique")
+
+UMAPPlot(Harmonized_seurat, group.by = "orig.ident")
+
+UMAPPlot(Harmonized_seurat, group.by = "subject")
+
+UMAPPlot(Harmonized_seurat, split.by = "disease.course")
+UMAPPlot(Harmonized_seurat, group.by = "disease.course")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue")
+UMAPPlot(Harmonized_seurat, group.by = "tissue")
+
+UMAPPlot(Harmonized_seurat, split.by = "tissue.subtype")
+UMAPPlot(Harmonized_seurat, group.by = "tissue.subtype")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology")
+UMAPPlot(Harmonized_seurat, group.by = "pathology")
+
+UMAPPlot(Harmonized_seurat, split.by = "pathology.activity")
+UMAPPlot(Harmonized_seurat, group.by = "pathology.activity")
+```
+
+
+# 4. Choice of harmonized object for downstream analyses
+
+We opt for the inclusion of variables "orig.ident" and "sequencing.technique" in the Harmony algorithm. Integration of the datasets will thus try to compensate for batch effects between individuals, across all datasets, as well as control for the experimental procedure used for each sample, i.e. snRNA-seq or scRNA-seq.
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- RunHarmony(Merged_seurat, group.by.vars = c("orig.ident", "sequencing.technique"), reduction = "pca", assay.use = "SCT", reduction.save = "harmony", kmeans_init_nstart=20, kmeans_init_iter_max=100)
+Harmonized_seurat@reductions
+
+summary(Harmonized_seurat@meta.data)
+str(Harmonized_seurat)
+
+saveRDS(Harmonized_seurat, "Harmonized_seurat.rds")
+
+sessionInfo()
+```

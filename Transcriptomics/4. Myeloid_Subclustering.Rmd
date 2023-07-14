@@ -1,0 +1,590 @@
+---
+title: "Subclustering of myeloid cells"
+author: "Stijn Swinnen and Jarne Beliën"
+date: "28-04-2023"
+output:
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+*Laboratory for Neuroimmunology; University of Leuven*
+
+
+**Based on (for the most part):**
+
+- [Satija Lab, Seurat vignettes](https://satijalab.org/seurat)
+
+- [Single-cell best practices](https://www.sc-best-practices.org/preamble.html) 
+
+- [University of Cambridge, "Wellcome Sanger Institute"](https://www.singlecellcourse.org/index.html)
+
+- [Harvard Chan Bioinformatics Core](https://hbctraining.github.io/scRNA-seq)
+
+- [Bioconductor: SingleR detailed vignette and book](http://bioconductor.org/books/release/SingleRBook/)
+
+
+*References to specific sources (e.g., articles and GitHub community pages) are provided in this script.*
+
+
+**Overview clustering parameters:**
+
+- SCTransform used to reduce technical noise; percentage mtRNA, rRNA and difference S-G2/M regressed out.
+
+- Harmony used for batch effect correction and dataset integration.
+
+- Number principal components (PCs) = 20.
+
+- Resolution clusters = 0.3.
+
+
+**Required packages (in alphabetical order):**
+
+```{r setup, Print Options}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r setup, Libraries}
+
+library(celldex)
+library(clustree)
+library(cowplot)
+library(data.table)
+library(plyr) # Needs to be loaded before dplyr
+library(dplyr)
+library(foreach)
+library(ggplot2)
+library(harmony)
+library(pdfCluster)
+library(purrr)
+library(RColorBrewer)
+library(scDblFinder)
+library(Seurat)
+library(SingleCellExperiment)
+library(SingleR)
+library(SoupX)
+library(stringr)
+library(tibble)
+library(tidyr)
+
+setwd("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/3. Myeloid subclustering")
+```
+
+
+# 1. Loading in the data
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/2. Integration/Harmonized_seurat.rds")
+Harmonized_seurat@reductions
+DefaultAssay(Harmonized_seurat)
+summary(Harmonized_seurat@meta.data)
+```
+
+
+# 2. Identifying remaining non-myeloid cells 
+
+## 2.1 Clustering
+
+Selection of the number of "Harmony" PCs:
+
+- *ElbowPlot*. Default reduction = "pca".
+
+```{r, fig.dim = c(10, 7)}
+
+ElbowPlot(Harmonized_seurat, ndims = 50, reduction = "harmony")
+```
+
+*SCTransform* is less susceptible to technical noise than *NormalizeData*, *FindVariableFeatures* and *ScaleData*. Therefore, we can choose a higher number of "Harmony" PCs without incorporating - too much - technical sources of variation. We decide to use the first **30** "Harmony" PCs.
+
+- *FindNeighbors*. Default reduction = "pca".
+
+- *FindClusters*. Default resolution = 0.8.
+
+- *RunUMAP*. Default reduction = "pca".
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- FindNeighbors(Harmonized_seurat, reduction = "harmony", dims = 1:30)
+Harmonized_seurat <- FindClusters(Harmonized_seurat)
+Harmonized_seurat <- RunUMAP(Harmonized_seurat, reduction = "harmony", dims = 1:30, verbose = FALSE)
+UMAPPlot(Harmonized_seurat, label = TRUE) # Resolution 0.8
+```
+
+
+## 2.2 Manual annotation
+
+### 2.2.1 Myeloid markers
+
+```{r, fig.dim = c(10, 7)}
+
+DefaultAssay(Harmonized_seurat)
+DefaultAssay(Harmonized_seurat) <- "RNA"
+DefaultAssay(Harmonized_seurat)
+```
+
+**Myeloid cells**
+
+- General myeloid cells: Upregulation PTPRC, CSF1R, P2RY12, ITGAM and LYZ.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("PTPRC", "CSF1R", "P2RY12", "ITGAM", "LYZ"), label = TRUE)
+VlnPlot(Harmonized_seurat, features = c("PTPRC", "CSF1R", "P2RY12", "ITGAM", "LYZ"))
+```
+
+**Dendritic cells**
+
+- Plasmacytoid dendritic cells (pDC): Upregulation TCF4 and TNFRSF21.
+
+- Myeloid dendritic cells 1 (mDC 1): Upregulation WDFY4, XCR1, BATF3, AXL and SIGLEC6.
+
+- Myeloid dendritic cells 2 (mDC 2): Upregulation FCER1A, CD1C, CLEC10A and CLEC9A.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("TCF4", "TNFRSF21"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("WDFY4", "XCR1", "BATF3", "AXL", "SIGLEC6"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("FCER1A", "CD1C", "CLEC10A", "CLEC9A"), label = TRUE)
+```
+
+**Granulocytes**
+
+- Granulocytes: Upregulation S100A8 and S100A9.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("S100A8", "S100A9"), label = TRUE)
+```
+
+**Monocytes and macrophages/microglia**
+
+- General monocytes: Upregulation VCAN, CCR2, HLA-DBP1 and CD74.
+
+- CD14+ monocytes: Upregulation CD14.
+
+- CD16+ monocytes: Upregulation FCGR3A (CD16).
+
+- Macrophages/microglia: Upregulation APOE and TREM2.
+
+- Macrophages: Upregulation EMP3 and LYVE1.
+
+- Microglia: Upregulation CD81, P2RY12, TMEM119, SPI1 and CX3CR1.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("VCAN", "CCR2", "HLA-DBP1", "CD74"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = "CD14", label = TRUE)
+FeaturePlot(Harmonized_seurat, features = "FCGR3A", label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("APOE", "TREM2"), label = TRUE)
+VlnPlot(Harmonized_seurat, features = c("APOE", "TREM2"))
+FeaturePlot(Harmonized_seurat, features = c("EMP3", "LYVE1"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("CD81", "P2RY12", "TMEM119", "SPI1", "CX3CR1"), label = TRUE)
+```
+
+
+### 2.2.1 Other canonical markers
+
+**Based on:**
+
+- Schafflick et al. (2020). Integrated single-cell analysis of blood and cerebrospinal fluid leukocytes in multiple sclerosis. Nature communications. Results ("Single-cell transcriptomics of cells in CSF and blood"), fig. 1 and suppl. fig. 2.
+
+- Esaulova et al. (2020). Single-cell RNA-seq analysis of human CSF microglia and myeloid cells in neuroinflammation. Neurology neuroimmunology and neuroinflammation. Fig. 1.
+
+- Ramesh et al. (2020). A pathogenic and clonally expanded B cell transcriptome in active multiple sclerosis. Proceedings of the National Academy of Sciences of the United States of America. Fig. 1 and suppl. dataset S2.
+
+- Pappalardo et al. (2020). Transcriptomic and clonal characterization of T cells in the human central nervous system. Science immunology. Suppl. fig. 1.
+
+- Kaufmann et al. (2021). Identifying CNS-colonizing T cells as potential therapeutic targets to prevent progression of multiple sclerosis. Med (New York, N.Y.). Fig. 1.
+
+- Roostaei et al. (2021). Defining the architecture of cerebrospinal fluid cellular communities in neuroinflammatory diseases. Preprint. Results ("Description of the single-cell data and clustering structure").
+
+- Kihara et al. (2022). Single-Nucleus RNA-seq of Normal-Appearing Brain Regions in Relapsing-Remitting vs. Secondary Progressive Multiple Sclerosis: Implications for the Efficacy of Fingolimod. Supplementary table S3.
+
+**T lymphocytes**
+
+- αβ T lymphocytes. Upregulation CD3D, CD3E and TRAC.
+
+- CD4+ T lymphocytes. Upregulation CD4 and IL7R.
+
+- CD8+ T lymphocytes. Upregulation CD8A and CD8B.
+
+- Activated CD8+ T lymphocytes. Upregulation CCL5.
+
+- Non-activated CD8+ T lymphocytes. Upregulation CCR7.
+
+- Regulatory T lymphocytes. Upregulation FOXP3 and CTLA4.
+
+- γδ T lymphocytes. Upregulation TRGC1 and TRDC.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("CD3D", "CD3E", "TRAC"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("CD4", "IL7R"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("CD8A", "CD8B"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = "CCL5", label = TRUE)
+FeaturePlot(Harmonized_seurat, features = "CCR7", label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("FOXP3", "CTLA4"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("TRGC1", "TRDC"), label = TRUE)
+```
+
+**NK cells**
+
+- General NK cells. Upregulation NKG7 and GNLY.
+
+- CD56 bright NK cells. Upregulation NCAM1 (= CD56), GZMK, SELL and XCL1.
+
+- CD56 dim NK cells. Upregulation FCGR3A, PRF1, GZMB and FGFBP2.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("NKG7", "GNLY"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("NCAM1", "GZMK", "SELL", "XCL1"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("FCGR3A", "PRF1", "GZMB", "FGFBP2"), label = TRUE)
+```
+
+**B lymphocytes**
+
+- General B lymphocytes. Upregulation CD19, MS4A1, CD79A, CD79B and IGHs.
+
+- Naive B lymphocytes. Upregulation CD37 and IGHD.
+
+- Memory B lymphocytes. Upregulation CD27 and IGHM.
+
+- Plasmablasts. Upregulation CD38, TNFRSF17 and IGHGs; downregulation MS4A1 and SDC1.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("CD19", "MS4A1", "CD79A", "CD79B"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("IGHD", "IGHM", "IGHA1", "IGHA2", "IGHG1", "IGHG2", "IGHG3", "IGHG4"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("CD37", "IGHD"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("CD27", "IGHM"), label = TRUE)
+FeaturePlot(Harmonized_seurat, features = c("CD38", "TNFRSF17", "IGHG1", "IGHG2", "IGHG3", "IGHG4", "MS4A1", "SDC1"), label = TRUE)
+```
+
+**Excitatory neurons**
+
+- General excitatory neurons. Upregulation of RBFOX3, SLC17A7, SATB2 and CBLN2.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("RBFOX3", "SLC17A7", "SATB2", "CBLN2"), label = TRUE)
+```
+
+**Inhibitory neurons**
+
+- General inhibitory neurons. Upregulation of GAD1, GAD2 and SLC6A1.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("GAD1", "GAD2", "SLC6A1"), label = TRUE)
+```
+
+**Oligodendrocytes**
+
+- General oligodendrocytes. Upregulation of PLP1, MOG and MBP.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("PLP1", "MOG", "MBP"), label = TRUE)
+```
+
+**Oligodendrocyte precursor cells**
+
+- General oligodendrocyte precursor cells. Upregulation of PDGFRA, VCAN and LUZP2.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("PDGFRA", "VCAN", "LUZP2"), label = TRUE)
+```
+
+**Astrocytes**
+
+- General astrocytes. Upregulation of GFAP, AQP4 and SLC1A2.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("GFAP", "AQP4", "SLC1A2"), label = TRUE)
+```
+
+**Endothelial cells**
+
+- General endothelial cells. Upregulation of CLDN5.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("CLDN5"), label = TRUE)
+```
+
+**Pericytes**
+
+- General pericytes. Upregulation of PDGFRB.
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Harmonized_seurat, features = c("PDGFRB"), label = TRUE)
+```
+
+
+## 2.3 Automated cluster annotation with *SingleR*
+
+*Reference SingleR: Aran et al. (2019). Reference-based analysis of lung single-cell sequencing reveals a transitional profibrotic macrophage. Nature immunology.*
+
+We also run an automated cluster annotation method *SingleR* - based on Spearman correlations between our dataset and a reference dataset. We use a **reference dataset** from *celldex* (Novershtern (microarray)).
+
+We use an immune reference dataset (celldex) to check again whether peripheral immune cells other than myeloid cells are still present in the data:
+```{r, fig.dim = c(10, 7)}
+
+Novershtern.ref <- celldex::NovershternHematopoieticData()
+```
+
+Convert Seurat object to SingleCellExperiment (Bioconductor):
+```{r, fig.dim = c(10, 7)}
+
+SCE <- as.SingleCellExperiment(DietSeurat(Harmonized_seurat))
+SCE
+```
+
+Extract cluster information:
+```{r, fig.dim = c(10, 7)}
+
+Clusters <- SCE$seurat_clusters
+```
+
+Cluster annotation with fine labels:
+```{r, fig.dim = c(10, 7)}
+
+Novershtern.fine <- SingleR(test = SCE, ref = Novershtern.ref, labels = Novershtern.ref$label.fine, clusters = Clusters)
+table(Novershtern.fine$labels) # Number clusters with same annotation; grouped
+table(Novershtern.fine$pruned.labels) # Low-quality annotations removed
+plotScoreHeatmap(Novershtern.fine, show.pruned = TRUE, show_colnames = TRUE)
+Harmonized_seurat[["Novershtern.fine"]] <- Novershtern.fine$labels[match(Harmonized_seurat[[]]["seurat_clusters"]$seurat_clusters, rownames(Novershtern.fine))]
+Harmonized_seurat <- SetIdent(Harmonized_seurat, value = "Novershtern.fine")
+UMAPPlot(Harmonized_seurat, label = TRUE) + NoLegend()
+```
+
+Cell annotation with fine labels:
+```{r, fig.dim = c(10, 7)}
+Novershtern.fine <- SingleR(test = SCE, ref = Novershtern.ref, labels = Novershtern.ref$label.fine)
+table(Novershtern.fine$labels) # Number cells with same annotation; grouped
+table(Novershtern.fine$pruned.labels) # Low-quality annotations removed
+Harmonized_seurat[["Novershtern.fine"]] <- Novershtern.fine$labels
+Harmonized_seurat <- SetIdent(Harmonized_seurat, value = "Novershtern.fine")
+UMAPPlot(Harmonized_seurat, label = TRUE, repel = TRUE) + NoLegend()
+```
+
+
+## 2.4 Differential gene expression
+
+Can we identify remaining non-myeloid cluster(s) based on DEGs?
+
+- *FindAllMarkers*. Default logfc.threshold = 0.25. Default test.use = "wilcox". Default min.pct (only test genes detected in a minimum fraction of cells) = 0.1.
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_seurat <- SetIdent(Harmonized_seurat, value = Harmonized_seurat$seurat_clusters)
+All_Markers <- FindAllMarkers(Harmonized_seurat, min.pct = 0.25, verbose = FALSE, only.pos = TRUE)
+```
+
+Top 10 cluster markers; sorted by average log2 fold change:
+```{r, fig.dim = c(10, 7)}
+options(max.print = 2000) # To overrule default max.print
+as.data.frame(All_Markers %>% group_by(cluster) %>% slice_max(avg_log2FC, n = 10))
+```
+
+We search the top 10 marker genes of each cluster in the [Azimuth single-cell references](https://azimuth.hubmapconsortium.org/references/) in order to identify non-myeloid clusters.
+
+
+## 2.5 Removal of non-myeloid clusters
+
+Based on the expression of canonical marker genes as well as the top 10 DEGs of each cluster, we identify the following clusters as being non-myeloid:
+
+- **Cluster 9:** Markers found for GABAergic neurons, glutamatergic neurons & oligodendrocytes.
+
+- **Cluster 16:** Markers found for astrocytes, oligodendrocytes as well as mitochondrial and ribosomal DEGs.
+
+```{r, fig.dim = c(10, 7)}
+
+Myeloid_cells <- subset(Harmonized_seurat, idents = c("0", "1", "2", "3", "4", "5", "6", "7", "8", "10", "11", "12", "13", "14", "15", "17", "18", "19", "20", "21"))
+UMAPPlot(Myeloid_cells, label = TRUE)
+```
+
+
+# 3. Data normalization and variance stabilization with *SCTransform*
+
+We rerun *SCTransform* in order to redefine the variable features in this cleaned dataset containing only the myeloid cells. This time, in accordance with Miedema et al., Schirmer et al. and Trobisch et al., we additionally regress out the percentage of ribosomal transcripts as to no let these confound downstream DEG analyses.
+
+```{r, fig.dim = c(10, 7)}
+
+Split_Myeloid_cells <- SplitObject(Myeloid_cells, split.by = "orig.object")
+for (i in 1:length(Split_Myeloid_cells)) {
+  Split_Myeloid_cells[[i]] <- SCTransform(Split_Myeloid_cells[[i]], vars.to.regress = c("percent.mt", "cc.difference", "percent.rb"), verbose = FALSE)
+}
+
+Split_Myeloid_cells$CSF@assays
+DefaultAssay(Split_Myeloid_cells$CSF)
+```
+
+Output = **Seurat objects** with new **SCT** assay and slots **counts** (corrected; reverse-transformed from Pearson residuals in scale.data and sequence-depth corrected), **data** (corrected; log-normalized counts) and **scale.data** (Pearson residuals).
+
+
+# 4. Integration of myeloid cells from all datasets with *Harmony*
+
+We now also rerun *Harmony* using the newly-defined variable features from the new SCT assay.
+
+```{r, fig.dim = c(10, 7)}
+
+Integration_Features <- SelectIntegrationFeatures(Split_Myeloid_cells, nfeatures = 3000)
+Merged_Myeloid_cells <- merge(Split_Myeloid_cells[[1]], Split_Myeloid_cells[2:length(Split_Myeloid_cells)])
+DefaultAssay(Merged_Myeloid_cells) <- "SCT"
+VariableFeatures(Merged_Myeloid_cells) <- Integration_Features
+Merged_Myeloid_cells <- RunPCA(Merged_Myeloid_cells, assay = "SCT")
+
+Harmonized_Myeloid_cells <- RunHarmony(Merged_Myeloid_cells, group.by.vars = c("orig.ident", "sequencing.technique"), reduction = "pca", assay.use = "SCT", reduction.save = "harmony", kmeans_init_nstart=20, kmeans_init_iter_max=100)
+Harmonized_Myeloid_cells@reductions
+DefaultDimReduc(Harmonized_Myeloid_cells)
+DefaultAssay(Harmonized_Myeloid_cells)
+```
+
+Output = batch-corrected **Seurat object** with additional reduction **harmony** (in addition to **pca**).
+
+We quickly check the integration again:
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_Myeloid_cells <- FindNeighbors(Harmonized_Myeloid_cells, reduction = "harmony", dims = 1:30)
+Harmonized_Myeloid_cells <- FindClusters(Harmonized_Myeloid_cells)
+Harmonized_Myeloid_cells <- RunUMAP(Harmonized_Myeloid_cells, reduction = "harmony", dims = 1:30, verbose = FALSE)
+UMAPPlot(Harmonized_Myeloid_cells, label = TRUE)
+
+UMAPPlot(Harmonized_Myeloid_cells, split.by = "orig.object")
+UMAPPlot(Harmonized_Myeloid_cells, group.by = "orig.object")
+
+UMAPPlot(Harmonized_Myeloid_cells, split.by = "sequencing.technique")
+UMAPPlot(Harmonized_Myeloid_cells, group.by = "sequencing.technique")
+
+UMAPPlot(Harmonized_Myeloid_cells, group.by = "orig.ident")
+
+UMAPPlot(Harmonized_Myeloid_cells, group.by = "subject")
+
+UMAPPlot(Harmonized_Myeloid_cells, split.by = "disease.course")
+UMAPPlot(Harmonized_Myeloid_cells, group.by = "disease.course")
+
+UMAPPlot(Harmonized_Myeloid_cells, split.by = "tissue")
+UMAPPlot(Harmonized_Myeloid_cells, group.by = "tissue")
+
+UMAPPlot(Harmonized_Myeloid_cells, split.by = "tissue.subtype")
+UMAPPlot(Harmonized_Myeloid_cells, group.by = "tissue.subtype")
+
+UMAPPlot(Harmonized_Myeloid_cells, split.by = "pathology")
+UMAPPlot(Harmonized_Myeloid_cells, group.by = "pathology")
+
+UMAPPlot(Harmonized_Myeloid_cells, split.by = "pathology.activity")
+UMAPPlot(Harmonized_Myeloid_cells, group.by = "pathology.activity")
+```
+
+
+# 4. Myeloid subclustering
+
+Selection number of *harmony* PCs:
+```{r, fig.dim = c(10, 7)}
+
+DimHeatmap(Harmonized_Myeloid_cells, dims = 1:10, cells = 500, reduction = "harmony") # Top 500 cells for each PC
+DimHeatmap(Harmonized_Myeloid_cells, dims = 11:20, cells = 500, reduction = "harmony")
+DimHeatmap(Harmonized_Myeloid_cells, dims = 21:30, cells = 500, reduction = "harmony")
+DimHeatmap(Harmonized_Myeloid_cells, dims = 31:40, cells = 500, reduction = "harmony")
+DimHeatmap(Harmonized_Myeloid_cells, dims = 41:50, cells = 500, reduction = "harmony")
+ElbowPlot(Harmonized_Myeloid_cells, ndims = 50, reduction = "harmony")
+```
+
+As the complexity of the data is not as high anymore now that we only have retained the myeloid cells, we will lower the number of *harmony* PCs that we use to perform the clustering. We decide to go for **20 PCs**.
+
+Then, we use *[clustree](https://academic.oup.com/gigascience/article/7/7/giy083/5052205)* to estimate the optimal **cluster resolution**.
+
+```{r, fig.dim = c(10, 7)}
+
+Harmonized_Myeloid_cells <- FindNeighbors(Harmonized_Myeloid_cells, reduction = "harmony", dims = 1:20)
+Harmonized_Myeloid_cells <- FindClusters(Harmonized_Myeloid_cells, resolution = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0))
+Harmonized_Myeloid_cells <- RunUMAP(Harmonized_Myeloid_cells, reduction = "harmony", dims = 1:20, verbose = FALSE)
+Harmonized_Myeloid_cells@reductions
+DefaultDimReduc(Harmonized_Myeloid_cells)
+
+clustree(Harmonized_Myeloid_cells, layout = "sugiyama", edge_width = 1.2) + scale_edge_color_continuous(low = "black", high = "black", guide = "none")
+
+#0.1
+Harmonized_Myeloid_cells <- SetIdent(Harmonized_Myeloid_cells, value = Harmonized_Myeloid_cells$SCT_snn_res.0.1)
+UMAPPlot(Harmonized_Myeloid_cells, label = TRUE)
+#0.2
+Harmonized_Myeloid_cells <- SetIdent(Harmonized_Myeloid_cells, value = Harmonized_Myeloid_cells$SCT_snn_res.0.2)
+UMAPPlot(Harmonized_Myeloid_cells, label = TRUE)
+#0.3
+Harmonized_Myeloid_cells <- SetIdent(Harmonized_Myeloid_cells, value = Harmonized_Myeloid_cells$SCT_snn_res.0.3)
+UMAPPlot(Harmonized_Myeloid_cells, label = TRUE)
+#0.4
+Harmonized_Myeloid_cells <- SetIdent(Harmonized_Myeloid_cells, value = Harmonized_Myeloid_cells$SCT_snn_res.0.4)
+UMAPPlot(Harmonized_Myeloid_cells, label = TRUE)
+#0.5
+Harmonized_Myeloid_cells <- SetIdent(Harmonized_Myeloid_cells, value = Harmonized_Myeloid_cells$SCT_snn_res.0.5)
+UMAPPlot(Harmonized_Myeloid_cells, label = TRUE)
+#0.6
+Harmonized_Myeloid_cells <- SetIdent(Harmonized_Myeloid_cells, value = Harmonized_Myeloid_cells$SCT_snn_res.0.6)
+UMAPPlot(Harmonized_Myeloid_cells, label = TRUE)
+#0.8
+Harmonized_Myeloid_cells <- SetIdent(Harmonized_Myeloid_cells, value = Harmonized_Myeloid_cells$SCT_snn_res.0.8)
+UMAPPlot(Harmonized_Myeloid_cells, label = TRUE)
+#1.0
+Harmonized_Myeloid_cells <- SetIdent(Harmonized_Myeloid_cells, value = Harmonized_Myeloid_cells$SCT_snn_res.1)
+UMAPPlot(Harmonized_Myeloid_cells, label = TRUE)
+```
+
+Now we look at CHIT1 expression in our dataset; does it map to a particular cluster at a particular resolution?
+```{r, fig.dim = c(10, 7)}
+CHIT1_cells <- WhichCells(Harmonized_Myeloid_cells, expression = CHIT1 > 0)
+UMAPPlot(Harmonized_Myeloid_cells, cells.highlight = CHIT1_cells) + NoLegend()
+summary(CHIT1_cells)
+Harmonized_Myeloid_cells <- SetIdent(Harmonized_Myeloid_cells, value = Harmonized_Myeloid_cells$SCT_snn_res.0.3)
+UMAPPlot(Harmonized_Myeloid_cells, split.by = "tissue")
+UMAPPlot(Harmonized_Myeloid_cells, group.by = "tissue")
+```
+
+Taking into account all this information, we opt for a **clustering resolution of 0.3**:
+
+- Looking at the clustering tree, it seems that between res 0.2 and 0.3 there is quite a substantial shift. However increasing the res beyond 0.3 only provides minor changes, illustrating the stability of res 0.3.
+
+- CHIT1-expressing cells seem to mainly cluster together into a single cluster (4) at this res.
+
+- CSF-derived myeloid cells in cluster 6 detach from cluster 0 at res 0.3.
+
+- The number of clusters at this res (13) accords with the number of clusters found by Miedema et al., whose dataset is the biggest contributor in number of cells to this dataset, supplemented with some additional clusters stemming from the CSF or the addition of the other datasets.
+
+
+# 5. Preliminary differential gene expression
+
+What do the DEGs look like at res 0.3?
+
+- *FindAllMarkers*. Default logfc.threshold = 0.25. Default test.use = "wilcox". Default min.pct (only test genes detected in a minimum fraction of cells) = 0.1.
+
+```{r, fig.dim = c(10, 7)}
+
+DefaultAssay(Harmonized_Myeloid_cells)
+DefaultAssay(Harmonized_Myeloid_cells) <- "RNA"
+DefaultAssay(Harmonized_Myeloid_cells)
+Harmonized_Myeloid_cells <- SetIdent(Harmonized_Myeloid_cells, value = Harmonized_Myeloid_cells$SCT_snn_res.0.3)
+All_Markers <- FindAllMarkers(Harmonized_Myeloid_cells, min.pct = 0.25, verbose = FALSE, only.pos = TRUE)
+```
+
+Top 10 cluster markers; sorted by average log2 fold change:
+```{r, fig.dim = c(10, 7)}
+options(max.print = 2000) # To overrule default max.print
+as.data.frame(All_Markers %>% group_by(cluster) %>% slice_max(avg_log2FC, n = 10))
+```
+
+
+# 6. Finalization
+
+```{r, fig.dim = c(10, 7)}
+
+str(Harmonized_Myeloid_cells)
+saveRDS(Harmonized_Myeloid_cells, "Harmonized_Myeloid_cells.rds")
+
+sessionInfo()
+```

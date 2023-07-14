@@ -1,0 +1,570 @@
+---
+title: "Pathway analysis CHIT1+ cells"
+author: "Stijn Swinnen and Jarne Beliën"
+date: "15-05-2023"
+output:
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+*Laboratory for Neuroimmunology; University of Leuven*
+
+
+**Based on (for the most part):**
+
+- [Biomedical knowledge mining book; YuLab, SMU](https://yulab-smu.top/biomedical-knowledge-mining-book/index.html)
+
+- [NGS Analysis e-book; NYU Center for Genomics and Systems Biology](https://learn.gencore.bio.nyu.edu/)
+
+
+*References to specific sources (e.g., articles and GitHub community pages) are provided in this script.*
+
+
+**Required packages:**
+
+```{r setup, Print Options}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r setup, Libraries}
+
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(DOSE)
+library(enrichR)
+library(Seurat)
+library(ggplot2)
+library(ggthemes)
+library(ggridges)
+library(viridisLite)
+library(dplyr)
+library(readxl)
+library(pathview)
+library(enrichplot)
+library(cowplot)
+library(writexl)
+
+setwd("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/7. Pathway analysis")
+```
+
+
+# 1. Loading in the data
+
+```{r, fig.dim = c(10, 7)}
+
+Seurat <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/3. Myeloid subclustering/Harmonized_Myeloid_cells.rds") 
+Seurat@reductions
+DefaultAssay(Seurat)
+summary(Seurat@meta.data)
+Clusters <- c("MG1", "MG2", "MG9", "MG8", "MG4", "MG5", "MMC", "CAM2", "MG3", "MON", "CAM1", "MG7", "MG6")
+names(Clusters) <- levels(Seurat)
+Seurat <- RenameIdents(Seurat, Clusters)
+Seurat@active.ident <- factor(Seurat@active.ident, levels = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"))
+Seurat$clusters <- factor(Seurat@active.ident, levels = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"))
+Colors <- c("#52677A", "#6687A3", "#4D908E", "#43AA8B", "#6AB47C", "#90BE6D", "#C5C35E", "#F9C74F", "#F8961E", "#F3722C", "#F65A38", "#F94144", "#835D7A")
+UMAPPlot(Seurat, pt.size = 1, label = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+```
+
+
+# 2. Preliminary pathway analysis on cluster MG4 Using *DEenrichRPlot* from Seurat
+
+GO Biological Process 2021:
+```{r, fig.dim = c(10, 7)}
+
+DEenrichRPlot(Seurat,
+              ident.1 = "MG4",
+              ident.2 = c("MG1", "MG2", "MG3", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"),
+              balanced = TRUE,
+              logfc.threshold = 0.25,
+              test.use = "wilcox",
+              max.genes = 100,
+              p.val.cutoff = 0.05,
+              enrich.database = "GO_Biological_Process_2021",
+              num.pathway = 10,
+              return.gene.list = FALSE)
+```
+
+KEGG 2021 Human:
+```{r, fig.dim = c(10, 7)}
+
+DEenrichRPlot(Seurat,
+              ident.1 = "MG4",
+              ident.2 = c("MG1", "MG2", "MG3", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"),
+              balanced = TRUE,
+              logfc.threshold = 0.25,
+              test.use = "wilcox",
+              max.genes = 100,
+              p.val.cutoff = 0.05,
+              enrich.database = "KEGG_2021_Human",
+              num.pathway = 10,
+              return.gene.list = FALSE)
+```
+
+
+# 3. Pathway analysis for CHIT1+ cells
+
+## 3.1 Loading in the DEGs
+
+The DEGs we load here are the result from the *FindMarkers* function in the *Seurat* package using the Wilcoxon statistical test comparing CHIT1+ cells with CHIT1- cells over all clusters - only DEGs with adjusted p-value < 0.05 retained.
+```{r, fig.dim = c(10, 7)}
+
+DEGs <- read_excel("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/6. CHIT1/FindMarkers CHIT1 results.xlsx")
+View(DEGs)
+```
+
+We make a ranked gene list from our DEGs file. Two columns are needed for downstream analyses, one for gene ID (no duplicated ID allowed) and another one for fold change. In this genelist, we include both up- and downregulated DEGs with a p_val_adj < 0.05:
+```{r, fig.dim = c(10, 7)}
+
+d <- DEGs %>% dplyr::filter(p_val_adj <= 0.05)
+d <- d[, 1:2]
+d <- as.data.frame(d)
+
+## feature 1: numeric vector
+genelist = d[,2]
+
+## feature 2: named vector
+names(genelist) = as.character(d[,1])
+
+## feature 3: decreasing orde
+genelist = sort(genelist, decreasing = TRUE)
+```
+
+## 3.2 GO over-representation analysis
+
+First, we distill a new ranked list of gene names from *genelist* containing only those DEGs with a log2FoldChange > 0.322, meaning with a foldchange of 1.25 or 25% increase in expression:
+```{r, fig.dim = c(10, 7)}
+
+genes <- names(genelist)[abs(genelist) > 0.322]
+
+head(genes)
+```
+
+We also make a vector of all the genes that were included in the DE analysis, to use as background set.
+```{r, fig.dim = c(10, 7)}
+
+counts <- as.matrix(Seurat@assays$RNA@counts)
+Background <- as.vector(rownames(counts))
+head(Background)
+```
+
+Now we perform a gene ontology overrepresentation test using *enrichGO* from the *clusterProfiler* package:
+```{r, fig.dim = c(10, 7)}
+
+ego <- enrichGO(gene          = genes,
+                keyType       = "SYMBOL",
+                universe      = Background,
+                OrgDb         = org.Hs.eg.db,
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.05,
+                qvalueCutoff  = 0.1,
+                minGSSize     = 10,
+                maxGSSize     = 90,
+                readable      = TRUE)
+head(ego, 20)
+```
+
+**Visualization**
+
+- dot plot
+
+```{r, fig.dim = c(10, 7)}
+
+dotplot(ego, showCategory = 20)
+```
+
+- directed acyclic graph
+
+```{r, fig.dim = c(10, 7)}
+
+goplot(ego)
+```
+
+- bar plot
+
+```{r, fig.dim = c(10, 7)}
+
+barplot(ego, showCategory = 20)
+```
+
+- heat plot
+
+```{r, fig.dim = c(10, 7)}
+
+heatplot(ego, foldChange = genelist, showCategory = 10)
+```
+
+
+## 3.3 GO Gene Set Enrichment Analysis (GSEA)
+
+We run *gseGO* from the *clusterProfiler* package:
+```{r, fig.dim = c(10, 7)}
+
+ego1 <- gseGO(geneList       = genelist,
+              OrgDb          = org.Hs.eg.db,
+              keyType        = "SYMBOL",
+              ont            = "BP",
+              minGSSize      = 10,
+              maxGSSize      = 90,
+              pvalueCutoff   = 0.05,
+              pAdjustMethod  = "BH",
+              nPermSimple    = 50000,
+              verbose        = TRUE)
+head(ego1, 20)
+```
+
+**Visualization**
+
+- dot plot
+
+```{r, fig.dim = c(10, 7)}
+
+dotplot(ego1, showCategory = 20)
+```
+
+- ridge plot
+
+```{r, fig.dim = c(10, 7)}
+
+ridgeplot(ego1) + labs(x = "enrichment distribution") + theme(axis.text.y = element_text(size = 10))
+```
+
+- GSEA plot
+
+```{r, fig.dim = c(10, 7)}
+
+gseaplot2(ego1, geneSetID = 8, title = ego1$Description[8])
+gseaplot2(ego1, geneSetID = 3, title = ego1$Description[3])
+gseaplot2(ego1, geneSetID = 12, title = ego1$Description[12])
+gseaplot2(ego1, geneSetID = 20, title = ego1$Description[20])
+```
+
+
+## 3.4 KEGG pathway over-representation analysis
+
+For KEGG analyses, we have to convert our gene SYMBOLS to gene IDs:
+```{r, fig.dim = c(10, 7)}
+
+keytypes(org.Hs.eg.db)
+genes_ID <- bitr(genes, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+Background_ID <- bitr(Background, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+```
+
+Now we perform a KEGG pathway overrepresentation test using *enrichKEGG¨* from the *clusterProfiler* package:
+```{r, fig.dim = c(10, 7)}
+
+kk <- enrichKEGG(gene         = genes_ID$ENTREZID,
+                universe      = Background_ID$ENTREZID,
+                organism      = "hsa",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.05)
+head(kk, 20)
+```
+
+**Visualization**
+
+- dot plot
+
+```{r, fig.dim = c(10, 7)}
+
+dotplot(kk)
+
+#Dotplot for setup figure
+dotplot(kk, showCategory = 20) &
+            theme(panel.background = element_rect(fill='transparent'), #transparent panel bg
+            plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+            panel.grid.major = element_blank(), #remove major gridlines
+            panel.grid.minor = element_blank(), #remove minor gridlines
+            legend.background = element_blank(), #transparent legend bg
+            legend.box.background = element_blank(), #transparent legend panel 
+            legend.key = element_blank()) #transparent upper legend bg
+ggsave("GSEA dotplot without background.png", height = 6, width = 6, dpi = 300, bg = 'transparent')
+```
+
+- bar plot
+
+```{r, fig.dim = c(10, 7)}
+
+barplot(kk, showCategory = 10)
+```
+
+- pathview
+
+```{r, fig.dim = c(10, 7)}
+
+#endocytosis <- pathview(gene.data  = genelist,
+#                     pathway.id = "hsa04144",
+#                     species    = "hsa")    
+
+#phagosome <- pathview (gene.data = genelist, 
+#                       pathway.id = "hsa04145",
+#                       species = "hsa")
+```
+
+
+## 3.5 KEGG pathway Gene Set Enrichment Analysis (GSEA)
+
+We have to provide a similar list as the *genelist* we used before with *gseGO*, only now the gene SYBMOLS have to be converted to ENTREZIDs:
+```{r, fig.dim = c(10, 7)}
+
+d <- DEGs %>% dplyr::filter(p_val_adj <= 0.05)
+d <- d[, 1:2]
+d <- as.data.frame(d)
+
+symbol_vector <- as.vector(d$gene)
+symbol_and_ID_vector <- bitr(symbol_vector, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+colnames(symbol_and_ID_vector)[1] ="gene"
+merged <- merge(d, symbol_and_ID_vector, by = "gene")
+d2 <- merged[, 2:3]
+d2 <- as.data.frame(d2)
+
+## feature 1: numeric vector
+genelist2 = d2[,1]
+
+## feature 2: named vector
+names(genelist2) = as.character(d2[,2])
+
+## feature 3: decreasing orde
+genelist2 = sort(genelist2, decreasing = TRUE)
+```
+
+Now we run *gseKEGG* from the *clusterProfiler* package:
+```{r, fig.dim = c(10, 7)}
+
+kk1 <- gseKEGG(geneList     = genelist2,
+              organism      = "hsa",
+              minGSSize     = 10,
+              maxGSSize     = 500,
+              pvalueCutoff  = 0.05,
+              pAdjustMethod = "BH",
+              nPermSimple   = 100000,
+              verbose       = TRUE)
+head(kk1, 20)
+```
+
+**Visualization**
+
+- dot plot
+
+```{r, fig.dim = c(10, 7)}
+
+dotplot(kk1, showCategory = 20)
+```
+
+- ridge plot
+
+```{r, fig.dim = c(10, 7)}
+
+ridgeplot(kk1) + labs(x = "enrichment distribution") + theme(axis.text.y = element_text(size = 10))
+```
+
+- GSEA plot
+
+```{r, fig.dim = c(10, 7)}
+
+#gseaplot2(kk1, geneSetID = 1, title = kk1$Description[1])
+#gseaplot2(kk1, geneSetID = 3, title = kk1$Description[3])
+#gseaplot2(kk1, geneSetID = 11, title = kk1$Description[11])
+```
+
+
+## 3.6 Disease over-representation analysis
+
+```{r, fig.dim = c(10, 7)}
+
+DO <- enrichDO(gene         = genes_ID$ENTREZID,
+              ont           = "DO",
+              pvalueCutoff  = 0.05,
+              pAdjustMethod = "BH",
+              universe      = Background_ID$ENTREZID,
+              minGSSize     = 10,
+              maxGSSize     = 700,
+              readable      = FALSE)
+head(DO, 20)   
+```
+
+**Visualization**
+
+- dot plot
+
+```{r, fig.dim = c(10, 7)}
+
+dotplot(DO, showCategory = 20)  
+```
+
+- heat plot
+
+```{r, fig.dim = c(10, 7)}
+
+heatplot(DO, foldChange = genelist2, showCategory = 20)
+```
+
+
+## 3.7 Disease Gene Set Enrichment Analysis (GSEA)
+
+```{r, fig.dim = c(10, 7)}
+
+gseDO <- gseDO(genelist2,
+               pvalueCutoff  = 0.05,
+               minGSSize = 10,
+               maxGSSize = 80,
+               pAdjustMethod = "BH",
+               verbose       = TRUE)
+head(gseDO, 20)  
+```
+
+**Visualization**
+
+- dot plot
+
+```{r, fig.dim = c(10, 7)}
+
+dotplot(gseDO, showCategory = 20)  
+```
+
+- heat plot
+
+```{r, fig.dim = c(10, 7)}
+
+heatplot(gseDO, foldChange = genelist2, showCategory = 15)
+```
+
+- ridge plot
+
+```{r, fig.dim = c(10, 7)}
+
+ridgeplot(gseDO) + labs(x = "enrichment distribution") + theme(axis.text.y = element_text(size = 10))
+```
+
+- GSEA plot
+
+```{r, fig.dim = c(10, 7)}
+
+gseaplot2(gseDO, geneSetID = 15, title = gseDO$Description[15])
+gseaplot2(gseDO, geneSetID = 18, title = gseDO$Description[18])
+```
+
+# 4. Figures for presentation
+
+- General UMAP:
+
+```{r, fig.dim = c(10, 7)}
+
+Img1 <- UMAPPlot(Seurat, pt.size = 1, label = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+
+Img1
+#ggsave("general umap.png", height = 5, width = 5, dpi = 300)
+```
+
+- Over-representation analysis:
+
+```{r, fig.dim = c(10, 7)}
+
+p1 <- dotplot(ego, showCategory = 20) + ggtitle("GO - Biological Process") + theme(axis.text = element_text(size = 10))
+p2 <- dotplot(kk) + ggtitle("KEGG") + theme(axis.text = element_text(size = 10))
+Img2 <- plot_grid(p1,p2, labels = LETTERS[1:2])
+
+Img2
+#ggsave("over-representation.png", height = 10, width = 13, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Img3 <- heatplot(ego, foldChange = genelist, showCategory = 10) + theme(axis.text = element_text(size = 15))
+
+Img3
+#ggsave("heatplot GO.png", height = 7, width = 10, dpi = 300)
+```
+
+- GSEA:
+
+```{r, fig.dim = c(10, 7)}
+
+p3 <- dotplot(ego1, showCategory = 20) + ggtitle("GO - Biological Process")
+p4 <- dotplot(kk1, showCategory = 20) + ggtitle("KEGG")
+Img4 <- plot_grid(p3,p4, labels = LETTERS[1:2])
+
+Img4
+#ggsave("GSEA dotplot.png", height = 10, width = 11, dpi = 300)
+```
+
+**GO Biological Process**
+
+```{r, fig.dim = c(10, 7)}
+Img5 <- gseaplot2(ego1, geneSetID = 8, title = ego1$Description[8])
+Img5
+#ggsave("GSEAplot GO tissue remodeling.png", height = 5, width = 5, dpi = 300)
+
+Img6 <- gseaplot2(ego1, geneSetID = 6, title = ego1$Description[6])
+Img6
+#ggsave("GSEAplot GO lipid homeostasis.png", height = 5, width = 5, dpi = 300)
+
+Img7 <- gseaplot2(ego1, geneSetID = 19, title = ego1$Description[19])
+Img7
+#ggsave("GSEAplot GO phagocytosis.png", height = 5, width = 5, dpi = 300)
+
+Img8 <- gseaplot2(ego1, geneSetID = 20, title = ego1$Description[20])
+Img8
+#ggsave("GSEAplot GO foam cell diff.png", height = 5, width = 5, dpi = 300)
+```
+
+**KEGG**
+
+```{r, fig.dim = c(10, 7)}
+
+#Img9 <- gseaplot2(kk1, geneSetID = 1, title = kk1$Description[1])
+#Img9
+#ggsave("GSEAplot KEGG cholesterol metabolism.png", height = 5, width = 5, dpi = 300)
+
+#Img10 <- gseaplot2(kk1, geneSetID = 3, title = kk1$Description[3])
+#Img10
+#ggsave("GSEAplot KEGG lysosome.png", height = 5, width = 5, dpi = 300)
+
+#Img11 <- gseaplot2(kk1, geneSetID = 4, title = kk1$Description[4])
+#Img11
+#ggsave("GSEAplot KEGG chemokine signaling.png", height = 5, width = 5, dpi = 300)
+
+#Img12 <- gseaplot2(kk1, geneSetID = 11, title = kk1$Description[11])
+#Img12
+#ggsave("GSEAplot KEGG ferroptosis.png", height = 5, width = 5, dpi = 300)
+```
+
+- Disease enrichment
+
+```{r, fig.dim = c(10, 7)}
+
+p5 <- dotplot(DO, showCategory = 20)  
+p6 <- dotplot(gseDO, showCategory = 20)  
+Img14 <- plot_grid(p5,p6, labels = LETTERS[1:2])
+
+Img14
+#ggsave("DO.png", height = 8, width = 13, dpi = 300)
+```
+
+
+# 5. Figures for publication
+
+```{r, fig.dim = c(10, 7)}
+
+Img15 <- dotplot(ego1, showCategory = 20) + ggtitle("GO - Biological Process")
+Img15
+ggsave("GSEA dotplot GO.png", height = 6, width = 6, dpi = 300)
+
+Img16 <- dotplot(kk1, showCategory = 20) + ggtitle("KEGG")
+Img16
+ggsave("GSEA dotplot KEGG.png", height = 6, width = 6, dpi = 300)
+```
+
+
+# 6. Saving the different pathway analyses as tables
+
+```{r, fig.dim = c(10, 7)}
+
+#write_xlsx(list(ego@result, ego1@result, kk@result, kk1@result, DO@result, gseDO@result), path = "Pathway analysis.xlsx") 
+```
+
+```{r, fig.dim = c(10, 7)}
+
+sessionInfo()
+```
