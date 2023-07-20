@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) [2023] [Jarne Beliën; Stijn Swinnen; Robbe D'hondt; Sinéad Moylett]
+Copyright (c) 2023 Jarne Beliën; Stijn Swinnen; Robbe D'hondt; Sinéad Moylett
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
