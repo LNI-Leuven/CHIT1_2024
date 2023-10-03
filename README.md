@@ -2,9 +2,7 @@
 This public repository contains the R code scripts to reproduce the main results and figures from our article **CHIT1 at diagnosis predicts faster disability progression and reflects early microglial activation in multiple sclerosis** published in *Science Translational Medicine* (Beliën et al.; 2023). In this study we provided a clear rationale for further validation of CHIT1 as a prognostic biomarker in multiple sclerosis (MS). To do so, we applied mixed-effects models, a machine learning approach and single-cell/nucleus transcriptomics. The R code for these analyses is here available and structured as follows:
 
 **Statistical models**
-- Correlation analysis:
-- Single-time point analysis:
-- Multi-time point analysis:
+- Correlation, single-time point and multi-time point analysis: `Biomarker and CHIT1 analyses.Rmd`
 
 **Machine learning**
 - `code.ipynb` is a Jupyter notebook (Python) showcasing the calculation of permutation importances for this paper.
