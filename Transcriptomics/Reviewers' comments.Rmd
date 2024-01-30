@@ -1,0 +1,856 @@
+---
+title: "Reviewers' comments"
+author: "Stijn Swinnen and Jarne Beliën"
+date: "25-01-2024"
+output:
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+*Laboratory for Neuroimmunology; University of Leuven*
+
+
+*References to specific sources (e.g., articles and GitHub community pages) are provided in this script.*
+
+
+**Required packages (in alphabetical order):**
+
+```{r setup, Print Options}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r setup, Libraries}
+
+library(celldex)
+library(dplyr)
+library(FSA)
+library(ggplot2)
+library(Seurat)
+library(SingleCellExperiment)
+library(SingleR)
+library(viridis)
+library(writexl)
+
+setwd("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/0. Supplementary")
+```
+
+
+# 1. Loading in the data
+
+```{r, fig.dim = c(10, 7)}
+
+Seurat <- readRDS("L:/GBW-0068_Neuroimmunology/ScRNA-seq/Paper CHIT1/3. Myeloid subclustering/Harmonized_Myeloid_cells.rds")
+DefaultAssay(Seurat)
+summary(Seurat@meta.data)
+Clusters <- c("MG1", "MG2", "MG9", "MG8", "MG4", "MG5", "MMC", "CAM2", "MG3", "MON", "CAM1", "MG7", "MG6")
+names(Clusters) <- levels(Seurat)
+Seurat <- RenameIdents(Seurat, Clusters)
+Seurat@active.ident <- factor(Seurat@active.ident, levels = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"))
+Seurat$clusters <- factor(Seurat@active.ident, levels = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"))
+Colors <- c("#52677A", "#6687A3", "#4D908E", "#43AA8B", "#6AB47C", "#90BE6D", "#C5C35E", "#F9C74F", "#F8961E", "#F3722C", "#F65A38", "#F94144", "#835D7A")
+UMAPPlot(Seurat, pt.size = 1, label = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+
+# Adjustment metadata (CNS_3)
+Metadata <- Seurat@meta.data
+Metadata[Metadata$orig.ident == "CNS_3_1", "disease.course"] <- "SPMS"
+Metadata[Metadata$orig.ident == "CNS_3_2", "disease.course"] <- "SPMS"
+Metadata[Metadata$orig.ident == "CNS_3_3", "disease.course"] <- "PMS"
+Metadata[Metadata$orig.ident == "CNS_3_4", "disease.course"] <- "SPMS"
+Metadata[Metadata$orig.ident == "CNS_3_5", "disease.course"] <- "PPMS"
+Seurat@meta.data <- Metadata
+```
+
+
+# 2. Distribution variables over integrated clusters
+
+## 2.1 Datasets
+
+Plots
+
+```{r, fig.dim = c(10, 7)}
+
+Object_List <- SplitObject(Seurat, split.by = "orig.object")
+Plot_List <- lapply(Object_List, FUN = function(x) {
+  UMAPPlot(x, pt.size = 1, label = TRUE, repel = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+})
+Plot_List$CSF
+ggsave("UMAPPlot CSF.png", height = 5, width = 5, dpi = 300)
+Plot_List$CNS_1
+ggsave("UMAPPlot CNS_1.png", height = 5, width = 5, dpi = 300)
+Plot_List$CNS_2
+ggsave("UMAPPlot CNS_2.png", height = 5, width = 5, dpi = 300)
+Plot_List$CNS_3
+ggsave("UMAPPlot CNS_3.png", height = 5, width = 5, dpi = 300)
+Plot_List$CNS_4
+ggsave("UMAPPlot CNS_4.png", height = 5, width = 5, dpi = 300)
+```
+
+Tables
+
+```{r, fig.dim = c(10, 7)}
+
+Table1 <- table(Seurat$orig.object, Seurat$clusters)
+Table2 <- prop.table(Table1, margin = 2)
+Table3 <- colSums(Table2)
+Table4 <- prop.table(Table1, margin = 1)
+Table4 <- prop.table(Table4, margin = 2)
+Table5 <- colSums(Table4)
+
+Table1 # Cells per dataset and cluster
+Table2 # Proportion cells per cluster across datasets = real distribution
+Table3 # Sum proportions cells per cluster across datasets; must be 1
+Table4 # Proportion cells per cluster across datasets weighted for dataset size
+Table5 # Sum proportions cells per cluster across datasets weighted for dataset size; must be 1
+
+# Bar plot table 2 = real distribution
+Table2 <- as.data.frame(Table2)
+colnames(Table2) <- c("Datasets", "Clusters", "Proportions")
+ggplot(Table2, aes(Clusters, Proportions, fill = Datasets)) + geom_bar(position = "stack", stat = "identity") + scale_fill_manual(values = c("#835D7A", "#F65A38", "#F8961E", "#C5C35E", "#6AB47C"), labels = c("CNS_1", "CNS_2", "CNS_3", "CNS_4", "CSF")) + scale_y_continuous(expand = c(0.02,0)) + geom_text(aes(label = round(Proportions, 2)), position = position_stack(vjust = 0.5), size = 3) + theme_classic() + theme(axis.text = element_text(size = 11), axis.title = element_text(size = 11), legend.text = element_text(size = 11), legend.title = element_text(size = 11))
+ggsave("Barplot datasets real.png", height = 5, width = 8, dpi = 300)
+
+# Bar plot table 4 = weighted distribution
+Table4 <- as.data.frame(Table4)
+colnames(Table4) <- c("Datasets", "Clusters", "Proportions")
+ggplot(Table4, aes(Clusters, Proportions, fill = Datasets)) + geom_bar(position = "stack", stat = "identity") + scale_fill_manual(values = c("#835D7A", "#F65A38", "#F8961E", "#C5C35E", "#6AB47C"), labels = c("CNS_1", "CNS_2", "CNS_3", "CNS_4", "CSF")) + scale_y_continuous(expand = c(0.02,0)) + geom_text(aes(label = round(Proportions, 2)), position = position_stack(vjust = 0.5), size = 3) + theme_classic() + theme(axis.text = element_text(size = 11), axis.title = element_text(size = 11), legend.text = element_text(size = 11), legend.title = element_text(size = 11))
+ggsave("Barplot datasets weighted.png", height = 5, width = 8, dpi = 300)
+```
+
+## 2.2 Tissue
+
+Plots
+
+```{r, fig.dim = c(10, 7)}
+
+Object_List <- SplitObject(Seurat, split.by = "tissue")
+Plot_List <- lapply(Object_List, FUN = function(x) {
+  UMAPPlot(x, pt.size = 1, label = TRUE, repel = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+})
+Plot_List$CSF
+ggsave("UMAPPlot CSF.png", height = 5, width = 5, dpi = 300)
+Plot_List$Brain
+ggsave("UMAPPlot brain.png", height = 5, width = 5, dpi = 300)
+Plot_List$`Spinal cord`
+ggsave("UMAPPlot spinal cord.png", height = 5, width = 5, dpi = 300)
+```
+
+Tables
+
+```{r, fig.dim = c(10, 7)}
+
+Table1 <- table(Seurat$tissue, Seurat$clusters)
+Table2 <- prop.table(Table1, margin = 2)
+Table3 <- colSums(Table2)
+Table4 <- prop.table(Table1, margin = 1)
+Table4 <- prop.table(Table4, margin = 2)
+Table5 <- colSums(Table4)
+
+Table1 # Cells per tissue and cluster
+Table2 # Proportion cells per cluster across tissues = real distribution
+Table3 # Sum proportions cells per cluster across tissues; must be 1
+Table4 # Proportion cells per cluster across tissues weighted for tissue size
+Table5 # Sum proportions cells per cluster across tissues weighted for tissue size; must be 1
+
+# Bar plot table 2 = real distribution
+Table2 <- as.data.frame(Table2)
+colnames(Table2) <- c("Tissues", "Clusters", "Proportions")
+ggplot(Table2, aes(Clusters, Proportions, fill = Tissues)) + geom_bar(position = "stack", stat = "identity") + scale_fill_manual(values = c("#835D7A", "#F8961E", "#6AB47C"), labels = c("Brain", "CSF", "Spinal cord")) + scale_y_continuous(expand = c(0.02,0)) + geom_text(aes(label = round(Proportions, 2)), position = position_stack(vjust = 0.5), size = 3) + theme_classic() + theme(axis.text = element_text(size = 11), axis.title = element_text(size = 11), legend.text = element_text(size = 11), legend.title = element_text(size = 11))
+ggsave("Barplot tissues real.png", height = 5, width = 8, dpi = 300)
+
+# Bar plot table 4 = weighted distribution
+Table4 <- as.data.frame(Table4)
+colnames(Table4) <- c("Tissues", "Clusters", "Proportions")
+ggplot(Table4, aes(Clusters, Proportions, fill = Tissues)) + geom_bar(position = "stack", stat = "identity") + scale_fill_manual(values = c("#835D7A", "#F8961E", "#6AB47C"), labels = c("Brain", "CSF", "Spinal cord")) + scale_y_continuous(expand = c(0.02,0)) + geom_text(aes(label = round(Proportions, 2)), position = position_stack(vjust = 0.5), size = 3) + theme_classic() + theme(axis.text = element_text(size = 11), axis.title = element_text(size = 11), legend.text = element_text(size = 11), legend.title = element_text(size = 11))
+ggsave("Barplot tissues weighted.png", height = 5, width = 8, dpi = 300)
+```
+
+## 2.3 Sequencing technique
+
+Plots
+
+```{r, fig.dim = c(10, 7)}
+
+Object_List <- SplitObject(Seurat, split.by = "sequencing.technique")
+Plot_List <- lapply(Object_List, FUN = function(x) {
+  UMAPPlot(x, pt.size = 1, label = TRUE, repel = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+})
+Plot_List$`scRNA-seq`
+ggsave("UMAPPlot scRNA-seq.png", height = 5, width = 5, dpi = 300)
+Plot_List$`snRNA-seq`
+ggsave("UMAPPlot snRNA-seq.png", height = 5, width = 5, dpi = 300)
+```
+
+Tables
+
+```{r, fig.dim = c(10, 7)}
+
+Table1 <- table(Seurat$sequencing.technique, Seurat$clusters)
+Table2 <- prop.table(Table1, margin = 2)
+Table3 <- colSums(Table2)
+Table4 <- prop.table(Table1, margin = 1)
+Table4 <- prop.table(Table4, margin = 2)
+Table5 <- colSums(Table4)
+
+Table1 # Cells per sequencing technique and cluster
+Table2 # Proportion cells per cluster across sequencing techniques = real distribution
+Table3 # Sum proportions cells per cluster across sequencing techniques; must be 1
+Table4 # Proportion cells per cluster across sequencing techniques weighted for sequencing technique size
+Table5 # Sum proportions cells per cluster across sequencing techniques weighted for sequencing technique size; must be 1
+
+# Bar plot table 2 = real distribution
+Table2 <- as.data.frame(Table2)
+colnames(Table2) <- c("Sequencing techniques", "Clusters", "Proportions")
+ggplot(Table2, aes(Clusters, Proportions, fill = `Sequencing techniques`)) + geom_bar(position = "stack", stat = "identity") + scale_fill_manual(values = c("#835D7A", "#6AB47C"), labels = c("scRNA-seq", "snRNA-seq")) + scale_y_continuous(expand = c(0.02,0)) + geom_text(aes(label = round(Proportions, 2)), position = position_stack(vjust = 0.5), size = 3) + theme_classic() + theme(axis.text = element_text(size = 11), axis.title = element_text(size = 11), legend.text = element_text(size = 11), legend.title = element_text(size = 11))
+ggsave("Barplot sequencing techniques real.png", height = 5, width = 8, dpi = 300)
+
+# Bar plot table 4 = weighted distribution
+Table4 <- as.data.frame(Table4)
+colnames(Table4) <- c("Sequencing techniques", "Clusters", "Proportions")
+ggplot(Table4, aes(Clusters, Proportions, fill = `Sequencing techniques`)) + geom_bar(position = "stack", stat = "identity") + scale_fill_manual(values = c("#835D7A", "#6AB47C"), labels = c("scRNA-seq", "snRNA-seq")) + scale_y_continuous(expand = c(0.02,0)) + geom_text(aes(label = round(Proportions, 2)), position = position_stack(vjust = 0.5), size = 3) + theme_classic() + theme(axis.text = element_text(size = 11), axis.title = element_text(size = 11), legend.text = element_text(size = 11), legend.title = element_text(size = 11))
+ggsave("Barplot sequencing techniques weighted.png", height = 5, width = 8, dpi = 300)
+```
+
+## 2.4 Disease course
+
+Plots
+
+```{r, fig.dim = c(10, 7)}
+
+Object_List <- SplitObject(Seurat, split.by = "disease.course")
+Plot_List <- lapply(Object_List, FUN = function(x) {
+  UMAPPlot(x, pt.size = 1, label = TRUE, repel = TRUE) + scale_color_manual(values = Colors) + NoLegend()
+})
+Plot_List$RRMS
+ggsave("UMAPPlot RRMS.png", height = 5, width = 5, dpi = 300)
+Plot_List$SPMS
+ggsave("UMAPPlot SPMS.png", height = 5, width = 5, dpi = 300)
+Plot_List$PPMS
+ggsave("UMAPPlot PPMS.png", height = 5, width = 5, dpi = 300)
+Plot_List$PMS
+ggsave("UMAPPlot PMS.png", height = 5, width = 5, dpi = 300)
+Plot_List$MS
+ggsave("UMAPPlot MS.png", height = 5, width = 5, dpi = 300)
+```
+
+Tables
+
+```{r, fig.dim = c(10, 7)}
+
+Table1 <- table(Seurat$disease.course, Seurat$clusters)
+Table2 <- prop.table(Table1, margin = 2)
+Table3 <- colSums(Table2)
+Table4 <- prop.table(Table1, margin = 1)
+Table4 <- prop.table(Table4, margin = 2)
+Table5 <- colSums(Table4)
+
+Table1 # Cells per disease course and cluster
+Table2 # Proportion cells per cluster across disease courses = real distribution
+Table3 # Sum proportions cells per cluster across disease courses; must be 1
+Table4 # Proportion cells per cluster across disease courses weighted for disease course size
+Table5 # Sum proportions cells per cluster across disease courses weighted for disease course size; must be 1
+
+# Bar plot table 2 = real distribution
+Table2 <- as.data.frame(Table2)
+colnames(Table2) <- c("Disease courses", "Clusters", "Proportions")
+ggplot(Table2, aes(Clusters, Proportions, fill = `Disease courses`)) + geom_bar(position = "stack", stat = "identity") + scale_fill_manual(values = c("#835D7A", "#F65A38", "#F8961E", "#C5C35E", "#6AB47C"), labels = c("MS", "PMS", "PPMS", "RRMS", "SPMS")) + scale_y_continuous(expand = c(0.02,0)) + geom_text(aes(label = round(Proportions, 2)), position = position_stack(vjust = 0.5), size = 3) + theme_classic() + theme_classic() + theme(axis.text = element_text(size = 11), axis.title = element_text(size = 11), legend.text = element_text(size = 11), legend.title = element_text(size = 11))
+ggsave("Barplot disease courses real.png", height = 5, width = 8, dpi = 300)
+
+# Bar plot table 4 = weighted distribution
+Table4 <- as.data.frame(Table4)
+colnames(Table4) <- c("Disease courses", "Clusters", "Proportions")
+ggplot(Table4, aes(Clusters, Proportions, fill = `Disease courses`)) + geom_bar(position = "stack", stat = "identity") + scale_fill_manual(values = c("#835D7A", "#F65A38", "#F8961E", "#C5C35E", "#6AB47C"), labels = c("MS", "PMS", "PPMS", "RRMS", "SPMS")) + scale_y_continuous(expand = c(0.02,0)) + geom_text(aes(label = round(Proportions, 2)), position = position_stack(vjust = 0.5), size = 3) + theme_classic() + theme_classic() + theme(axis.text = element_text(size = 11), axis.title = element_text(size = 11), legend.text = element_text(size = 11), legend.title = element_text(size = 11))
+ggsave("Barplot disease courses weighted.png", height = 5, width = 8, dpi = 300)
+```
+
+
+# 3. Distribution CHIT1 expression over CSF/CNS datasets
+
+Plots
+
+```{r, fig.dim = c(10, 7)}
+
+CHIT1_Cells <- WhichCells(Seurat, expression = CHIT1 > 0)
+length(CHIT1_Cells)
+Object_List <- SplitObject(Seurat, split.by = "orig.object")
+Plot_List <- lapply(Object_List, FUN = function(x) {
+  UMAPPlot(x, cells.highlight = CHIT1_Cells, cols.highlight = "#43AA8B", pt.size = 1) + NoLegend()
+})
+Plot_List$CSF
+ggsave("UMAPPlot CHIT1 CSF.png", height = 5, width = 5, dpi = 300)
+Plot_List$CNS_1
+ggsave("UMAPPlot CHIT1 CNS_1.png", height = 5, width = 5, dpi = 300)
+Plot_List$CNS_2
+ggsave("UMAPPlot CHIT1 CNS_2.png", height = 5, width = 5, dpi = 300)
+Plot_List$CNS_3
+ggsave("UMAPPlot CHIT1 CNS_3.png", height = 5, width = 5, dpi = 300)
+Plot_List$CNS_4
+ggsave("UMAPPlot CHIT1 CNS_4.png", height = 5, width = 5, dpi = 300)
+```
+
+Tables
+
+```{r, fig.dim = c(10, 7)}
+
+CHIT1 <- subset(Seurat, subset = CHIT1 > 0)
+Table1 <- table(CHIT1$orig.object)
+Table2 <- table(Seurat$orig.object)
+Table3 <- Table1/Table2
+Table4 <- sum(Table3)
+Table5 <- Table1/ncol(CHIT1)
+Table6 <- sum(Table5)
+Table7 <- Table3/Table4
+Table8 <- sum(Table7)
+
+Table1 # CHIT1+ cells per dataset
+Table2 # Total cells per dataset
+Table3 # Proportion CHIT1+ cells per dataset
+Table4 # Sum proportions CHIT1+ cells per dataset
+Table5 # Distribution CHIT1+ cells over datasets
+Table6 # Sum distributions CHIT1+ cells over datasets; must be 1
+Table7 # Distribution CHIT1+ cells over datasets weighted for dataset size
+Table8 # Sum distributions CHIT1+ cells over datasets weighted for dataset size; must be 1
+
+write.table(Table3, "Proportion CHIT1 per dataset.txt")
+write.table(Table5, "Distribution CHIT1 over datasets.txt")
+write.table(Table7, "Weighted distribution CHIT1 over datasets.txt")
+```
+
+
+# 4. Mitochondrial RNA (mtRNA)
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(Seurat, features = "percent.mt", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot mtRNA.png", height = 5, width = 6, dpi = 300)
+```
+
+
+# 5. Distinction microglia and CAMs
+
+## 5.1 Microglia
+
+Van Hove et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+Microglia1 <- list(c("SALL1", "ADGRG1", "SLC2A5", "IL1A", "GOLM1", "ADAMTS1", "SELPLG", "SPARC", "GEM", "SERPINE2", "P2RY12", "FSCN1", "RTN4RL1", "ATP6V0A2", "ARHGAP5", "SIGLEC6", "CD33", "SMAD7", "P2RY13", "TMEM119", "FAM102B", "SMAP2", "CSF3R", "SOGA1", "KCNK6", "WSB1", "RGS1", "LDHB", "GPR34", "GLUL", "CST3", "LHFPL2", "GPR155", "RASAL3", "DTX4", "SRGAP2C", "SRGAP2B", "FRMD4A", "SPATA13", "QKI", "ENTPD1", "HEXB", "TANC2", "BIN1", "TREM2", "OLFML3", "CTSF", "ELMO1", "ASPH", "GNA15", "CMTM6", "HERPUD1", "BRD2", "PDE3B", "TGFBR1", "DAGLB", "NFKBIA", "BASP1", "ARSB", "INPP5D", "FMNL3", "SLC29A3", "SIPA1", "CX3CR1", "SNX18", "F11R", "ITGB5", "FCRL2"))
+Seurat <- AddModuleScore(Seurat, features = Microglia1, name = "Microglia1") # Microglia11 in metadata
+
+FeaturePlot(Seurat, features = "Microglia11", pt.size = 1, order = TRUE, min.cutoff = "q10", max.cutoff = "q99") +
+  scale_color_viridis() +
+  labs(title = NULL)
+ggsave("FeaturePlot microglia Van Hove.png", height = 5, width = 6, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Microglia1_Data <- FetchData(Seurat, vars = c("clusters", "Microglia11"))
+colnames(Microglia1_Data) <- c("Cluster", "Module score")
+
+ggplot(Microglia1_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Microglia1_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+ggsave("Boxplot microglia Van Hove.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Cluster, data = Microglia1_Data)
+dunnTest(`Module score` ~ Cluster, data = Microglia1_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Microglia1_Data$`Module score`)
+Microglia1_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Microglia1_Data$Group <- ifelse(Microglia1_Data$Cluster %!in% c("MON", "CAM1", "CAM2", "MMC"), "Microglia", as.character(Microglia1_Data$Cluster))
+Microglia1_Data$Group <- factor(Microglia1_Data$Group, levels = c("Microglia", "MON", "CAM1", "CAM2", "MMC"))
+ggplot(Microglia1_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Microglia1_Data, !Group %in% "Microglia"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Microglia1_Data, Group %in% "Microglia"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#000000", "#F3722C", "#F65A38", "#F94144", "#835D7A")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+ggsave("Boxplot microglia Van Hove 2.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Group, data = Microglia1_Data)
+dunnTest(`Module score` ~ Group, data = Microglia1_Data, method = "bh")
+```
+
+Jordão et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+Microglia2 <- list(c("SPARC", "HEXB", "P2RY12", "TMEM119", "SIGLECH", "CST3", "CTSL", "SALL1", "GPR34", "OLFML3", "SELPLG", "TREM2", "BHLHE41", "SLC2A5", "LGMN", "SERPINE2", "P2RY13"))
+Seurat <- AddModuleScore(Seurat, features = Microglia2, name = "Microglia2") # Microglia21 in metadata
+
+FeaturePlot(Seurat, features = "Microglia21", pt.size = 1, order = TRUE, min.cutoff = "q10", max.cutoff = "q99") +
+  scale_color_viridis() +
+  labs(title = NULL)
+ggsave("FeaturePlot microglia Jordão.png", height = 5, width = 6, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Microglia2_Data <- FetchData(Seurat, vars = c("clusters", "Microglia21"))
+colnames(Microglia2_Data) <- c("Cluster", "Module score")
+
+ggplot(Microglia2_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Microglia2_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+ggsave("Boxplot microglia Jordão.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Cluster, data = Microglia2_Data)
+dunnTest(`Module score` ~ Cluster, data = Microglia2_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Microglia2_Data$`Module score`)
+Microglia2_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Microglia2_Data$Group <- ifelse(Microglia2_Data$Cluster %!in% c("MON", "CAM1", "CAM2", "MMC"), "Microglia", as.character(Microglia2_Data$Cluster))
+Microglia2_Data$Group <- factor(Microglia2_Data$Group, levels = c("Microglia", "MON", "CAM1", "CAM2", "MMC"))
+ggplot(Microglia2_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Microglia2_Data, !Group %in% "Microglia"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Microglia2_Data, Group %in% "Microglia"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#000000", "#F3722C", "#F65A38", "#F94144", "#835D7A")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+ggsave("Boxplot microglia Jordão 2.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Group, data = Microglia2_Data)
+dunnTest(`Module score` ~ Group, data = Microglia2_Data, method = "bh")
+```
+
+Sankowski et al. (2023).
+
+```{r, fig.dim = c(10, 7)}
+
+Microglia3 <- list(c("P2RY12", "TMEM119", "SLC2A5"))
+Seurat <- AddModuleScore(Seurat, features = Microglia3, name = "Microglia3") # Microglia31 in metadata
+
+FeaturePlot(Seurat, features = "Microglia31", pt.size = 1, order = TRUE, min.cutoff = "q10", max.cutoff = "q99") +
+  scale_color_viridis() +
+  labs(title = NULL)
+ggsave("FeaturePlot microglia Sankowski.png", height = 5, width = 6, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Microglia3_Data <- FetchData(Seurat, vars = c("clusters", "Microglia31"))
+colnames(Microglia3_Data) <- c("Cluster", "Module score")
+
+ggplot(Microglia3_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Microglia3_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+ggsave("Boxplot microglia Sankowski.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Cluster, data = Microglia3_Data)
+dunnTest(`Module score` ~ Cluster, data = Microglia3_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Microglia3_Data$`Module score`)
+Microglia3_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Microglia3_Data$Group <- ifelse(Microglia3_Data$Cluster %!in% c("MON", "CAM1", "CAM2", "MMC"), "Microglia", as.character(Microglia3_Data$Cluster))
+Microglia3_Data$Group <- factor(Microglia3_Data$Group, levels = c("Microglia", "MON", "CAM1", "CAM2", "MMC"))
+ggplot(Microglia3_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Microglia3_Data, !Group %in% "Microglia"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Microglia3_Data, Group %in% "Microglia"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#000000", "#F3722C", "#F65A38", "#F94144", "#835D7A")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+ggsave("Boxplot microglia Sankowski 2.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Group, data = Microglia3_Data)
+dunnTest(`Module score` ~ Group, data = Microglia3_Data, method = "bh")
+```
+
+Sankowski et al. (2023); disease-associated microglia (DAM).
+
+```{r, fig.dim = c(10, 7)}
+
+Microglia4 <- list(c("CLEC7A", "TREM2", "CTSZ", "CCL23", "CCL15", "CCL14", "ANKH", "IGF1", "ITGAX", "CTSD", "SPP1", "AXL", "CTSB", "TYROBP", "APOE", "CD9", "CSF1", "CD63"))
+Seurat <- AddModuleScore(Seurat, features = Microglia4, name = "Microglia4") # Microglia41 in metadata
+
+FeaturePlot(Seurat, features = "Microglia41", pt.size = 1, order = TRUE, min.cutoff = "q10", max.cutoff = "q99") +
+  scale_color_viridis() +
+  labs(title = NULL)
+ggsave("FeaturePlot DAM Sankowski.png", height = 5, width = 6, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Microglia4_Data <- FetchData(Seurat, vars = c("clusters", "Microglia41"))
+colnames(Microglia4_Data) <- c("Cluster", "Module score")
+
+ggplot(Microglia4_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Microglia4_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+ggsave("Boxplot DAM Sankowski.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Cluster, data = Microglia4_Data)
+dunnTest(`Module score` ~ Cluster, data = Microglia4_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Microglia4_Data$`Module score`)
+Microglia4_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Microglia4_Data$Group <- ifelse(Microglia4_Data$Cluster %!in% c("MON", "CAM1", "CAM2", "MMC"), "Microglia", as.character(Microglia4_Data$Cluster))
+Microglia4_Data$Group <- factor(Microglia4_Data$Group, levels = c("Microglia", "MON", "CAM1", "CAM2", "MMC"))
+ggplot(Microglia4_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Microglia4_Data, !Group %in% "Microglia"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Microglia4_Data, Group %in% "Microglia"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#000000", "#F3722C", "#F65A38", "#F94144", "#835D7A")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+ggsave("Boxplot DAM Sankowski 2.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Group, data = Microglia4_Data)
+dunnTest(`Module score` ~ Group, data = Microglia4_Data, method = "bh")
+```
+
+## 5.2 CAMs
+
+Jordão et al. (2019).
+
+```{r, fig.dim = c(10, 7)}
+
+CAM1 <- list(c("MS4A7", "MRC1", "CBR2", "PF4", "CD163"))
+Seurat <- AddModuleScore(Seurat, features = CAM1, name = "CAM1") # CAM11 in metadata
+
+FeaturePlot(Seurat, features = "CAM11", pt.size = 1, order = TRUE, min.cutoff = "q10", max.cutoff = "q99") +
+  scale_color_viridis() +
+  labs(title = NULL)
+ggsave("FeaturePlot CAM Jordão.png", height = 5, width = 6, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+CAM1_Data <- FetchData(Seurat, vars = c("clusters", "CAM11"))
+colnames(CAM1_Data) <- c("Cluster", "Module score")
+
+ggplot(CAM1_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(CAM1_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+ggsave("Boxplot CAM Jordão.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Cluster, data = CAM1_Data)
+dunnTest(`Module score` ~ Cluster, data = CAM1_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(CAM1_Data$`Module score`)
+CAM1_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+CAM1_Data$Group <- ifelse(CAM1_Data$Cluster %!in% c("MON", "CAM1", "CAM2", "MMC"), "Microglia", as.character(CAM1_Data$Cluster))
+CAM1_Data$Group <- factor(CAM1_Data$Group, levels = c("MON", "CAM1", "CAM2", "MMC", "Microglia"))
+ggplot(CAM1_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(CAM1_Data, !Group %in% "Microglia"), outlier.shape = NA) +
+  geom_boxplot(data = subset(CAM1_Data, Group %in% "Microglia"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#F3722C", "#F65A38", "#F94144", "#835D7A", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+ggsave("Boxplot CAM Jordão 2.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Group, data = CAM1_Data)
+dunnTest(`Module score` ~ Group, data = CAM1_Data, method = "bh")
+```
+
+Sankowski et al. (2023).
+
+```{r, fig.dim = c(10, 7)}
+
+CAM2 <- list(c("MRC1", "MS4A7", "CD163", "LYVE1", "STAB1"))
+Seurat <- AddModuleScore(Seurat, features = CAM2, name = "CAM2") # CAM21 in metadata
+
+FeaturePlot(Seurat, features = "CAM21", pt.size = 1, order = TRUE, min.cutoff = "q10", max.cutoff = "q99") +
+  scale_color_viridis() +
+  labs(title = NULL)
+ggsave("FeaturePlot CAM Sankowski.png", height = 5, width = 6, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+CAM2_Data <- FetchData(Seurat, vars = c("clusters", "CAM21"))
+colnames(CAM2_Data) <- c("Cluster", "Module score")
+
+ggplot(CAM2_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(CAM2_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+ggsave("Boxplot CAM Sankowski.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Cluster, data = CAM2_Data)
+dunnTest(`Module score` ~ Cluster, data = CAM2_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(CAM2_Data$`Module score`)
+CAM2_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+CAM2_Data$Group <- ifelse(CAM2_Data$Cluster %!in% c("MON", "CAM1", "CAM2", "MMC"), "Microglia", as.character(CAM2_Data$Cluster))
+CAM2_Data$Group <- factor(CAM2_Data$Group, levels = c("MON", "CAM1", "CAM2", "MMC", "Microglia"))
+ggplot(CAM2_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(CAM2_Data, !Group %in% "Microglia"), outlier.shape = NA) +
+  geom_boxplot(data = subset(CAM2_Data, Group %in% "Microglia"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#F3722C", "#F65A38", "#F94144", "#835D7A", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+ggsave("Boxplot CAM Sankowski 2.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Group, data = CAM2_Data)
+dunnTest(`Module score` ~ Group, data = CAM2_Data, method = "bh")
+```
+
+## 5.3 Monocytes
+
+Sankowski et al. (2023).
+
+```{r, fig.dim = c(10, 7)}
+
+Mono <- list(c("CCR2", "CLEC12A", "PLAC8", "FCN1", "S100A9"))
+Seurat <- AddModuleScore(Seurat, features = Mono, name = "Mono") # Mono1 in metadata
+
+FeaturePlot(Seurat, features = "Mono1", pt.size = 1, order = TRUE, min.cutoff = "q10", max.cutoff = "q99") +
+  scale_color_viridis() +
+  labs(title = NULL)
+ggsave("FeaturePlot monocytes Sankowski.png", height = 5, width = 6, dpi = 300)
+```
+
+```{r, fig.dim = c(10, 7)}
+
+Mono_Data <- FetchData(Seurat, vars = c("clusters", "Mono1"))
+colnames(Mono_Data) <- c("Cluster", "Module score")
+
+ggplot(Mono_Data, aes(x = Cluster, y = `Module score`, fill = Cluster)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_hline(yintercept = median(Mono_Data$`Module score`), linetype = 2) +
+  scale_fill_manual(values = Colors) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8), legend.position = "none")
+ggsave("Boxplot monocytes Sankowski.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Cluster, data = Mono_Data)
+dunnTest(`Module score` ~ Cluster, data = Mono_Data, method = "bh")
+```
+
+```{r, fig.dim = c(10, 7)}
+
+median(Mono_Data$`Module score`)
+Mono_Data %>%
+  group_by(Cluster) %>%
+  summarise(Median = median(`Module score`))
+
+"%!in%" <- Negate("%in%")
+Mono_Data$Group <- ifelse(Mono_Data$Cluster %!in% c("MON", "CAM1", "CAM2", "MMC"), "Microglia", as.character(Mono_Data$Cluster))
+Mono_Data$Group <- factor(Mono_Data$Group, levels = c("MON", "CAM1", "CAM2", "MMC", "Microglia"))
+ggplot(Mono_Data, aes(x = Group, y = `Module score`, fill = Group)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(data = subset(Mono_Data, !Group %in% "Microglia"), outlier.shape = NA) +
+  geom_boxplot(data = subset(Mono_Data, Group %in% "Microglia"), fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("#F3722C", "#F65A38", "#F94144", "#835D7A", "#000000")) +
+  facet_grid(~ Group, scales = "free_x", space = "free_x") +
+  theme_classic() +
+  theme(legend.position = "none", strip.background = element_blank(), strip.text = element_blank(), panel.spacing.x = unit(0, "lines"))
+ggsave("Boxplot monocytes Sankowski 2.png", height = 5, width = 5, dpi = 300)
+kruskal.test(`Module score` ~ Group, data = Mono_Data)
+dunnTest(`Module score` ~ Group, data = Mono_Data, method = "bh")
+```
+
+## 5.4 Conserved genes across species
+
+Sankowski et al. (2023).
+
+```{r, fig.dim = c(10, 7)}
+
+# Microglia
+FeaturePlot(Seurat, features = "P2RY12", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot P2RY12.png", height = 5, width = 6, dpi = 300)
+FeaturePlot(Seurat, features = "SLC2A5", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot SLC2A5.png", height = 5, width = 6, dpi = 300)
+FeaturePlot(Seurat, features = "SELPLG", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot SELPLG.png", height = 5, width = 6, dpi = 300)
+FeaturePlot(Seurat, features = "SPP1", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot SPP1.png", height = 5, width = 6, dpi = 300)
+
+# CAMS
+FeaturePlot(Seurat, features = "MRC1", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot MRC1.png", height = 5, width = 6, dpi = 300)
+FeaturePlot(Seurat, features = "F13A1", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot F13A1.png", height = 5, width = 6, dpi = 300)
+FeaturePlot(Seurat, features = "STAB1", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot STAB1.png", height = 5, width = 6, dpi = 300)
+FeaturePlot(Seurat, features = "CD163", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot CD163.png", height = 5, width = 6, dpi = 300)
+```
+
+Ostkamp et al. (2022).
+
+```{r, fig.dim = c(10, 7)}
+
+# CAMS
+FeaturePlot(Seurat, features = "TGFBI", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+ggsave("FeaturePlot TGFBI.png", height = 5, width = 6, dpi = 300)
+```
+
+## 5.5 Heatmaps
+
+```{r, fig.dim = c(10, 7)}
+
+# Whole Seurat object
+Seurat[["Module.scores"]] <- CreateAssayObject(t(FetchData(Seurat, vars = c("Microglia11", "Microglia21", "Microglia31", "Microglia41", "CAM11", "CAM21", "Mono1"))))
+Averaged_Seurat <- AverageExpression(Seurat, return.seurat = TRUE, assays = "Module.scores")
+
+ModuleScores <- GetAssayData(Averaged_Seurat, assay = "Module.scores")
+ModuleScores <- scale(ModuleScores)
+rownames(ModuleScores) <- c("Microglia 1; Van Hove et al. (2019)", "Microglia 2; Jordão et al. (2019)", "Microglia 3; Sankowski et al. (2023)", "DAM; Sankowski et al. (2023)", "CAM 1; Jordão et al. (2019)", "CAM 2; Sankowski et al. (2023)", "Monocytes; Sankowski et al. (2023)")
+HA <- HeatmapAnnotation(Clusters = c("MG1", "MG2", "MG3", "MG4", "MG5", "MG6", "MG7", "MG8", "MG9", "MON", "CAM1", "CAM2", "MMC"), col = list(Clusters = c("MG1" = "#52677A", "MG2" = "#6687A3", "MG3" = "#4D908E", "MG4" = "#43AA8B", "MG5" = "#6AB47C", "MG6" = "#90BE6D", "MG7" = "#C5C35E", "MG8" = "#F9C74F", "MG9" = "#F8961E", "MON" = "#F3722C", "CAM1" = "#F65A38", "CAM2" = "#F94144", "MMC" = "#835D7A")), show_legend = FALSE, show_annotation_name = FALSE)
+Heatmap <- Heatmap(ModuleScores, col = viridis(100), name = "Module score", cluster_rows = FALSE, cluster_columns = FALSE, row_order = rev(rownames(ModuleScores)), column_order = colnames(ModuleScores), row_names_side = "left", row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10), bottom_annotation = HA, row_split = data.frame(rep(c("Microglia", "CAM", "Monocytes"), c(4, 2, 1))))
+Heatmap
+png("Heatmap.png", height = 5, width = 7, units = "in", res = 300)
+plot(Heatmap)
+dev.off()
+
+# CHIT1+ cells
+CHIT1 <- subset(Seurat, CHIT1 > 0)
+Averaged_CHIT1 <- AverageExpression(CHIT1, return.seurat = TRUE, assays = "Module.scores")
+ModuleScores <- GetAssayData(Averaged_CHIT1, assay = "Module.scores")
+ModuleScores <- rowMeans(ModuleScores)
+ModuleScores <- scale(ModuleScores)
+rownames(ModuleScores) <- c("Microglia 1; Van Hove et al. (2019)", "Microglia 2; Jordão et al. (2019)", "Microglia 3; Sankowski et al. (2023)", "DAM; Sankowski et al. (2023)", "CAM 1; Jordão et al. (2019)", "CAM 2; Sankowski et al. (2023)", "Monocytes; Sankowski et al. (2023)")
+Heatmap <- Heatmap(ModuleScores, col = viridis(100), name = "Module score", cluster_rows = FALSE, cluster_columns = FALSE, row_order = rev(rownames(ModuleScores)), column_order = colnames(ModuleScores), row_names_side = "left", row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10))
+Heatmap
+png("Heatmap CHIT1.png", height = 5, width = 4, units = "in", res = 300)
+plot(Heatmap)
+dev.off()
+```
+
+
+# 6. Proportion microglia-like CSF cells
+
+```{r, fig.dim = c(10, 7)}
+
+Table <- table(Seurat$clusters, Seurat$tissue)
+Table
+# 1192 CSF cells in clusters MG1-MG9
+1192/22506
+```
+
+
+# 7. Distribution MS patients over CSF clusters
+
+Plots
+
+```{r, fig.dim = c(10, 7)}
+
+CSF <- readRDS("CSF.rds")
+Novershtern.ref <- celldex::NovershternHematopoieticData()
+SCE <- as.SingleCellExperiment(DietSeurat(CSF))
+Clusters <- SCE$seurat_clusters
+Novershtern.fine <- SingleR(test = SCE, ref = Novershtern.ref, labels = Novershtern.ref$label.fine, clusters = Clusters)
+CSF[["Novershtern.fine"]] <- Novershtern.fine$labels[match(CSF[[]]["seurat_clusters"]$seurat_clusters, rownames(Novershtern.fine))]
+CSF <- SetIdent(CSF, value = "Novershtern.fine")
+UMAPPlot(CSF)
+Object_List <- SplitObject(CSF, split.by = "subject")
+Plot_List <- lapply(Object_List, FUN = function(x) {
+  UMAPPlot(x, pt.size = 1, label = TRUE, repel = TRUE) + NoLegend()
+})
+Plot_List$MS_0_1
+Plot_List$MS_0_2
+Plot_List$MS_0_3
+Plot_List$MS_0_4
+Plot_List$MS_0_5
+Plot_List$MS_0_6
+Plot_List$MS_0_7
+Plot_List$MS_0_8
+Plot_List$MS_0_9
+Plot_List$MS_0_10
+Plot_List$MS_0_11
+```
+
+Tables
+
+```{r, fig.dim = c(10, 7)}
+
+Table1 <- table(CSF$subject, CSF$Novershtern.fine)
+Table2 <- prop.table(Table1, margin = 2)
+Table3 <- colSums(Table2)
+
+Table1 # Cells per dataset and cluster
+Table2 # Proportion cells per cluster across datasets = real distribution
+Table3 # Sum proportions cells per cluster across datasets; must be 1
+
+# Bar plot table 2 = real distribution
+Table2 <- as.data.frame(Table2)
+colnames(Table2) <- c("Subjects", "Clusters", "Proportions")
+Labels <- c("CD4+ EM", "CD8+ CM", "CD8+ EM", "Gran", "B cells", "NK cells", "Monocytes", "mDC", "pDC")
+ggplot(Table2, aes(Clusters, Proportions, fill = Subjects)) + geom_bar(position = "stack", stat = "identity") + scale_x_discrete(labels = Labels) + scale_y_continuous(expand = c(0.02,0)) + geom_text(aes(label = round(Proportions, 2)), position = position_stack(vjust = 0.5), size = 3) + theme_classic() + theme(axis.text = element_text(size = 11), axis.title = element_text(size = 11), legend.text = element_text(size = 11), legend.title = element_text(size = 11), axis.text.x = element_text(angle = 45, vjust = 0.5))
+```
+
+```{r, fig.dim = c(10, 7)}
+
+FeaturePlot(CSF, features = "CHIT1", pt.size = 1, order = TRUE) + scale_color_viridis() + labs(title = NULL)
+```
+
+
+# 8. Downregulated DEGs
+
+```{r, fig.dim = c(10, 7)}
+
+Markers <- FindAllMarkers(Seurat, logfc.threshold = 0.322, min.pct = 0.25, verbose = FALSE)
+Markers <- subset(Markers, avg_log2FC < 0)
+Markers <- Markers[c("cluster", "gene", "avg_log2FC", "p_val_adj", "p_val", "pct.1", "pct.2")]
+Markers <- Markers %>% group_by(cluster) %>% arrange(avg_log2FC, .by_group = TRUE)
+write_xlsx(Markers, path = "FindAllMarkers results.xlsx")
+```
+
+```{r, fig.dim = c(10, 7)}
+sessionInfo()
+```
