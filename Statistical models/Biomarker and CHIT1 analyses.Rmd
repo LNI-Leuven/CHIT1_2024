@@ -1,0 +1,1596 @@
+---
+title: "Biomarker Project"
+author: "Sinéad Moylett"
+date: "01-08-2023"
+output:
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+*Laboratory for Neuroimmunology; University of Leuven*
+
+## Install packages
+```{r}
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(psych)
+library(Hmisc)
+library(pROC) 
+library(ROCR)
+library(ggpubr)
+library(ggplot2)
+library(jtools)
+library(extrafont)
+```
+
+### Study population characteristics ----------------------------
+Import data
+```{r}
+setwd("/Volumes/shares/GBW-0089_Neuroimmunology/Sinéad/Biomarkers")
+biomarkerdata<-read.table("allbiomarkerdata_06.01.2023.txt", header=TRUE, sep="\t", dec = ".") #192
+```
+
+Fill in blank CHIT1 log values from previous data
+```{r}
+biomarkerdata$CHIT1_log[biomarkerdata$CHIT1_Mean==39.280]<-1.59
+biomarkerdata$CHIT1_log[biomarkerdata$CHIT1_Mean==93.780]<-1.97
+biomarkerdata$CHIT1_log[biomarkerdata$CHIT1_Mean==365.290]<-2.56
+biomarkerdata$CHIT1_log[biomarkerdata$CHIT1_Mean==1206.010]<-3.08
+```
+
+Study population characteristics across the total cohort and divided into disability and relapse
+1. Whole cohort
+```{r}
+# Prepare demographic variables
+biomarkerdata$Gender<-as.factor(biomarkerdata$Gender)  #1 = Female, 2 = Male
+biomarkerdata$Disease_course<-as.factor(biomarkerdata$Disease_course)  #1 = PPMS, 2 = RRMS, 3 = unknown 
+biomarkerdata$Date_Onset<-as.Date(biomarkerdata$Date_Onset, format = "%Y-%m-%d")
+biomarkerdata$Birth_date<-as.Date(biomarkerdata$Birth_date, format = "%Y-%m-%d")
+biomarkerdata$age_onset<-as.numeric(biomarkerdata$age_onset)
+biomarkerdata$Datum_LP<-as.Date(biomarkerdata$Datum_LP, format = "%Y-%m-%d")
+biomarkerdata$disease_duration_LP<-as.numeric(biomarkerdata$disease_duration_LP)
+biomarkerdata<-biomarkerdata %>% add_column(age_LP = "age_LP", .after = "Datum_LP")
+biomarkerdata$age_LP<-lubridate::time_length(difftime(biomarkerdata$Datum_LP, biomarkerdata$Birth_date), "years")
+
+# Descriptives
+summary(biomarkerdata$Gender)
+summary(biomarkerdata$Disease_course)
+summary(biomarkerdata$age_onset)
+summary(biomarkerdata$disease_duration_LP)
+# OCB
+#'Extra_OCB' is the OCB count
+biomarkerdata$OCB_count_labels<-as.factor(biomarkerdata$OCB_count_labels)  # 1 = positive (2 or more in OCB_count), 2 = negative, 3 = unknown
+summary(biomarkerdata$OCB_count_labels)
+# IgG
+summary(biomarkerdata$IgG_index)
+
+# Checking disease duration
+biomarkerdata$disease_course_check<-difftime(biomarkerdata$Datum_LP, biomarkerdata$Date_Onset, units = "days")
+biomarkerdata$disease_course_check2<-biomarkerdata$disease_course_check/365.25
+biomarkerdata$disease_course_check2<-as.numeric(biomarkerdata$disease_course_check2)
+```
+
+2. Disability
+From Annals of Neurology paper:
+For clinical and radiological variables, we consistently applied the inverse rank normal transformation for main analyses, as most variables were not normally distributed.
+First, we defined our primary and secondary outcomes...
+As primary outcome, we tested the association between CSF biomarker levels and the following disease activity parameters: ARMSS, recently developed, as a measure of disability progression16. 
+As secondary outcomes, we analyzed the relationship between our CSF biomarker levels and MSSS, as measure of disease progression15; EDSS, as measure of disability.
+These associations were assessed using the linear regression model of clinical or neurological variables in function of biomarker levels, including covariates when they were correlated with biomarkers. 
+
+Disability: 
+1. ARMSS - EDSS + age - primary outcome
+2. MSSS - EDSS + disease duration - secondary outcome
+3. EDSS - percentile in a function of age - secondary outcome
+
+Completed in previous version:
+- Use R package ms.sev to calculate MSSS + ARMSS from EDSS 
+- EDSS: most recent score
+```{r}
+# Create dataset removing patients without disability data
+disability<-biomarkerdata[!is.na(biomarkerdata$edss),]  #178
+
+# Descriptives
+summary(disability$Gender)
+summary(disability$Disease_course)
+summary(disability$age_onset)
+summary(disability$disease_duration_LP)
+# OCB
+summary(disability$OCB_count_labels)
+# IgG
+summary(disability$IgG_index)
+# Time LP to most recent EDSS
+disability$Date_EDSS<-as.Date(disability$Date_EDSS, format = "%Y-%m-%d")
+disability<-disability %>% add_column(years_LP_EDSS = "years_LP_EDSS", .after = "Date_EDSS")
+disability$years_LP_EDSS<-lubridate::time_length(difftime(disability$Date_EDSS, disability$Datum_LP), "years")
+summary(disability$years_LP_EDSS)
+#EDSS
+summary(disability$edss)
+#MSSS
+summary(disability$uGMSSS)
+#ARMSS
+summary(disability$gARMSS)
+```
+
+3. Relapse
+From Annals of Neurology paper:
+For clinical and radiological variables, we consistently applied the inverse rank normal transformation for main analyses, as most variables were not normally distributed.
+First, we defined our primary and secondary outcomes...
+As primary outcome, we tested the association between CSF biomarker levels and the following disease activity parameters: annualized relapse rate before treatment (minimal untreated follow-up of 90 days), measuring the relapse activity.
+As secondary outcome, we analyzed the relationship between our CSF biomarker levels and annualized relapse rate during entire follow-up (untreated and treated), as relapse activity parameter.
+
+Relapse: 
+1. Annualized relapse rate, untreated - primary outcome
+2. Annualized relapse rate, all - secondary outcome - ignore for now (AG, 14.12.2021)
+
+Calculating primary outcome from raw relapse data
+Primary outcome: Formatted relapse data from MV: shares/GBW-0089_Neuroimmunology/Sinéad/Biomarkers/Relapse analysis/Data from Marijne_Relapse/22032021_ClinicalData_BEL/Final_phenofile/Phenofile_BEL_for_analysis_v2.Rds
+
+Onset = first relapse
+Censor = Start of treatment or last visit whichever is first
+Baseline = onset - relapse
+AAR = Number of relapses / baseline (min 90 days)
+
+Data preparation and transfomation completed in excel and previous file version.
+```{r}
+# Create dataset removing patients without relapse data
+relapse<-biomarkerdata[!is.na(biomarkerdata$ARR),]  #181
+
+# Descriptives
+summary(relapse$Gender)
+summary(relapse$Disease_course)
+summary(relapse$age_onset)
+summary(relapse$disease_duration_LP)
+# OCB
+summary(relapse$OCB_count_labels)
+# IgG
+summary(relapse$IgG_index)
+# Relapse
+summary(relapse$N_Relapses)
+summary(relapse$ARR)
+```
+
+### Data transformations (Already completed) -----------------------------
+GPNMB, CCL18, CHIT1: log transformation
+ARMSS, MSSS + EDSS: inverse rank normal transformation
+Inverse rank normal transformation in R if you have missing data:
+y<‐qnorm((rank(x,na.last="keep")‐0.5)/sum(!is.na(x))
+Taken from: Yang, J., Loos, R., Powell, J. et al. FTO genotype is associated with phenotypic variability of body mass index. Nature 490, 267–272 (2012). https://doi.org/10.1038/nature11401
+```{r}
+## Primary: ARMSS
+# Descriptives
+#summary(biomarkerdata$gARMSS)
+#describe(biomarkerdata$gARMSS) #skew = 0.91, kurtosis = -0.41
+# Normality tests
+#shapiro.test(biomarkerdata$gARMSS) #not normally distributed - p = 0.00000000002565
+# Distribution
+#qplot(biomarkerdata$gARMSS, geom="histogram") #heavy left skew
+
+## Secondary: MSSS
+# Descriptives
+#summary(biomarkerdata$uGMSSS)
+#describe(biomarkerdata$uGMSSS) #skew = 0.98, kurtosis = -0.24
+# Normality tests
+#shapiro.test(biomarkerdata$uGMSSS) #not normally distributed - p = 0.00000000001209
+# Distribution
+#qplot(biomarkerdata$uGMSSS, geom="histogram") #heavy left skew
+
+## Secondary: EDSS
+# Descriptives
+#summary(biomarkerdata$edss)
+#describe(biomarkerdata$edss) #skew = 1.47, kurtosis = 2.61
+# Normality tests
+#shapiro.test(biomarkerdata$edss) #not normally distributed - p = 0.0000000000006753
+# Distribution
+#qplot(biomarkerdata$edss, geom="histogram") #heavy left skew
+
+## Log transformations for biomarkers: CCL18, GPNMB, CHIT1
+## all data
+#biomarkerdata<-biomarkerdata %>% add_column(CCL18_Mean_log = "CCL18_Mean_log", .after = "CCL18_Mean")
+#biomarkerdata$CCL18_Mean<-as.numeric(biomarkerdata$CCL18_Mean)
+#biomarkerdata$CCL18_Mean_log<-log10(biomarkerdata$CCL18_Mean)
+#biomarkerdata<-biomarkerdata %>% add_column(GPNMB_Mean_log = "GPNMB_Mean_log", .after = "GPNMB_Mean")
+#biomarkerdata$GPNMB_Mean<-as.numeric(biomarkerdata$GPNMB_Mean)
+#biomarkerdata$GPNMB_Mean_log<-log10(biomarkerdata$GPNMB_Mean)
+### pg/ml to ng/ml
+#biomarkerdata<-biomarkerdata %>% mutate(GPNMB_Mean_ng = GPNMB_Mean / 1000, .after = GPNMB_Mean_log)
+#biomarkerdata<-biomarkerdata %>% add_column(GPNMB_Mean_ng_log = "GPNMB_Mean_ng_log", .after = "GPNMB_Mean_ng")
+#biomarkerdata$GPNMB_Mean_ng_log<-log10(biomarkerdata$GPNMB_Mean_ng)
+#biomarkerdata<-biomarkerdata %>% mutate(CCL18_Mean_ng = CCL18_Mean / 1000, .after = CCL18_Mean_log)
+#biomarkerdata<-biomarkerdata %>% add_column(CCL18_Mean_ng_log = "CCL18_Mean_ng_log", .after = "CCL18_Mean_ng")
+#biomarkerdata$CCL18_Mean_ng_log<-log10(biomarkerdata$CCL18_Mean_ng)
+#Log transformation for CHIT1 completed already
+
+## Inverse rank normal transformation for clinical variables: ARMSS, MSSS + EDSS
+#biomarkerdata<-biomarkerdata %>% add_column(gARMSS_inv = "gARMSS_inv", .after = "gARMSS")
+#biomarkerdata$gARMSS_inv<-qnorm((rank(biomarkerdata$gARMSS,na.last="keep")-0.5)/sum(!is.na(biomarkerdata$gARMSS)))
+#qplot(biomarkerdata$gARMSS_inv, geom="histogram") #normal distribution
+#shapiro.test(biomarkerdata$gARMSS_inv) #normal distribution - p = 1
+
+#biomarkerdata<-biomarkerdata %>% add_column(uGMSSS_inv = "uGMSSS_inv", .after = "uGMSSS")
+#biomarkerdata$uGMSSS_inv<-qnorm((rank(biomarkerdata$uGMSSS,na.last="keep")-0.5)/sum(!is.na(biomarkerdata$uGMSSS)))
+#qplot(biomarkerdata$uGMSSS_inv, geom="histogram") #normal distribution
+#shapiro.test(biomarkerdata$uGMSSS_inv) #normal distribution - p = 1
+
+#biomarkerdata<-biomarkerdata %>% add_column(edss_inv = "edss_inv", .after = "edss")
+#biomarkerdata$edss_inv<-qnorm((rank(biomarkerdata$edss,na.last="keep")-0.5)/sum(!is.na(biomarkerdata$edss)))
+#qplot(biomarkerdata$edss_inv, geom="histogram") #heavy left skew
+#shapiro.test(biomarkerdata$edss_inv) #not normally distributed - p = 3.232e-07
+```
+
+### Correlations between CSF biomarkers -----------------------------
+```{r}
+## Variables
+biomarkers_corr<-biomarkerdata %>% select(GPNMB_Mean_log, CCL18_Mean_log, YKL40_log, CHIT1_log, sTREM2_log, NfL_log)
+
+## Clean column names
+names(biomarkers_corr)[names(biomarkers_corr)=='GPNMB_Mean_log']<-'GPNMB'
+names(biomarkers_corr)[names(biomarkers_corr)=='CCL18_Mean_log']<-'CCL18'
+names(biomarkers_corr)[names(biomarkers_corr)=='YKL40_log']<-'CHI3L1'
+names(biomarkers_corr)[names(biomarkers_corr)=='CHIT1_log']<-'CHIT1'
+names(biomarkers_corr)[names(biomarkers_corr)=='sTREM2_log']<-'sTREM2'
+names(biomarkers_corr)[names(biomarkers_corr)=='NfL_log']<-'NfL'
+
+## Summary
+summary(biomarkers_corr$CHIT1)
+summary(biomarkers_corr$GPNMB)
+summary(biomarkers_corr$CCL18)
+summary(biomarkers_corr$CHI3L1)
+summary(biomarkers_corr$sTREM2)
+summary(biomarkers_corr$NfL)
+
+## Normality tests
+shapiro.test(biomarkers_corr$GPNMB) #Not normally distributed - p = 8.915e-09
+shapiro.test(biomarkers_corr$CCL18) #Normally distributed - p = 0.2437
+shapiro.test(biomarkers_corr$CHI3L1) #Normally distributed - p = 0.522
+shapiro.test(biomarkers_corr$CHIT1) #Normally distributed - p = 0.2384
+shapiro.test(biomarkers_corr$sTREM2) #Normally distributed - p = 1107
+shapiro.test(biomarkers_corr$NfL) #Not normally distributed - p = 7.061e-05
+
+## Distribution
+qplot(biomarkers_corr$GPNMB, geom="histogram") #Heavy right skew
+qplot(biomarkers_corr$CCL18, geom="histogram") #Normally distributed
+qplot(biomarkers_corr$CHI3L1, geom="histogram") #Normally distributed
+qplot(biomarkers_corr$CHIT1, geom="histogram") #Slight right skew
+qplot(biomarkers_corr$sTREM2, geom="histogram") #Slight right skew
+qplot(biomarkers_corr$NfL, geom="histogram") #Right skew
+#Vast majority normally distributed
+
+## Descriptive statistics
+describe(biomarkers_corr)
+summary(biomarkers_corr)
+
+## Correlation matrix
+rcorr(as.matrix(biomarkers_corr),type="pearson")
+
+## Plots: Individual plots for significant correlations
+# Set font
+#install.packages("showtext")
+library(showtext)
+font_file<-"/Volumes/shares/GBW-0089_Neuroimmunology/Sinéad/Biomarkers/Figures/Myriad Pro Regular.ttf"
+showtext_auto()  
+font_add("MyriadPro", regular=font_file)
+plot_font<-"MyriadPro"
+font_size<-36
+
+# A: CHIT1 x CHI3L1
+plota <- ggscatter(biomarkers_corr, x = "CHIT1", y = "CHI3L1",
+                   add = "reg.line", add.params = list(size = 0.4), conf.int = TRUE,
+                   cor.coef = FALSE, color = "#52677A", cor.method = "pearson",
+                   cor.coeff.args = list(method = "pearson"),
+                   xlab = "CHIT1 (log, pg/ml)", ylab = "CHI3L1 (log, ng/ml)", size = 0.5) +
+  theme_bw() +
+  theme(axis.title = element_text(color = "black", size = font_size, family = plot_font),
+        plot.subtitle = element_text(size = font_size, family = plot_font),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        plot.title = element_text(size = font_size, family = plot_font),
+        axis.text.x = element_text(size = font_size),
+        axis.text.y = element_text(size = font_size)) +
+  labs(title = "R = 0.48, p = 0.0000, N = 128")
+plota
+plota<-ggsave("plota.png", width=6, height=6, dpi=300)
+
+# B: CHIT1 x GPNMB
+plotb<-ggscatter(biomarkers_corr, x="CHIT1", y="GPNMB",
+                add="reg.line", add.params=list(size=0.4), conf.int=TRUE, 
+                cor.coef=FALSE, color="#52677A", cor.method="pearson", cor.coeff.args=list(method="pearson"),
+                xlab="CHIT1 (log, pg/ml)" , ylab="GPNMB (log, pg/ml)", size=0.5)+
+  theme_bw() +
+  theme(axis.title=element_text(color="black", size=font_size, family=plot_font)) +
+  theme(plot.subtitle=element_text(size=font_size, family=plot_font)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) +
+  labs(title="R = 0.41, p = 0.0000, N = 180") +
+  theme(plot.title=element_text(size=font_size, family=plot_font))
+plotb<-plotb+theme(axis.text.x=element_text(size=font_size),
+                   axis.text.y=element_text(size=font_size))
+plotb
+plotb<-ggsave("plotb.png", width=6, height=6, dpi=300)
+
+# C: GPNMB x CHI3L1
+plotc<-ggscatter(biomarkers_corr, x="GPNMB", y="CHI3L1",
+                add="reg.line", add.params=list(size=0.4), conf.int=TRUE, 
+                cor.coef=FALSE, color="#52677A", cor.method="pearson", cor.coeff.args=list(method="pearson"),
+                xlab="GPNMB (log, pg/ml)", ylab="CHI3L1 (log, ng/ml)", size=0.5)+
+  theme_bw() +
+  theme(axis.title=element_text(color="black", size=font_size, family=plot_font)) +
+  theme(plot.subtitle=element_text(size=font_size, family=plot_font)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) +
+  labs(title="R = 0.41, p = 0.0000, N = 180") +
+  theme(plot.title=element_text(size=font_size, family=plot_font))
+plotc<-plotc+theme(axis.text.x=element_text(size=font_size),
+                   axis.text.y=element_text(size=font_size))
+plotc
+plotc<-ggsave("plotc.png", width=6, height=6, dpi=300)
+
+# D: CHIT1 x NfL
+plotd<-ggscatter(biomarkers_corr, x="CHIT1", y="NfL",
+                add="reg.line", add.params=list(size=0.4), conf.int=TRUE, 
+                cor.coef=FALSE, color="#6687A3",cor.method="pearson", cor.coeff.args=list(method="pearson"),
+                xlab="CHIT1 (log, pg/ml)" , ylab="NfL (log, pg/ml)", size=0.5)+
+  theme_bw() +
+  theme(axis.title=element_text(color="black", size=font_size, family=plot_font)) +
+  theme(plot.subtitle=element_text(size=font_size, family=plot_font)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) +
+  labs(title="R = 0.31, p = 0.0000, N = 158") +
+  theme(plot.title=element_text(size=font_size, family=plot_font))
+plotd<-plotd+theme(axis.text.x=element_text(size=font_size),
+                   axis.text.y=element_text(size=font_size))
+plotd
+plotd<-ggsave("plotd.png", width=6, height=6, dpi=300)
+
+## Additional scatterplots - not included in paper
+# GPNMB x CCL18
+plote<-ggscatter(biomarkers_corr, x="GPNMB", y="CCL18",
+                add="reg.line", add.params=list(size=0.4), conf.int=TRUE, 
+                cor.coef=FALSE, cor.method="pearson", cor.coeff.args=list(method="pearson"),
+                xlab="GPNMB (log, pg/ml)", ylab="CCL18 (log, pg/ml)", size=0.5)+
+  theme_bw() +
+  theme(axis.title=element_text(color="black", size=font_size, family=plot_font)) +
+  theme(plot.subtitle=element_text(size=font_size, family=plot_font)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) +
+  labs(title="R = 0.22, p = 0.0022, N = 187") +
+  theme(plot.title=element_text(size=font_size, family=plot_font))
+plote<-plote+theme(axis.text.x=element_text(size=font_size),
+                   axis.text.y=element_text(size=font_size))
+plote
+#plote<-ggsave("plote.png", width=6, height=6, dpi=300)
+
+# CCL18 x CHI3L1
+plotf<-ggscatter(biomarkers_corr, x="CCL18", y="CHI3L1",
+                add="reg.line", add.params=list(size=0.4), conf.int=TRUE, 
+                cor.coef=FALSE, cor.method="pearson", cor.coeff.args=list(method="pearson"),
+                xlab="CCL18 (log, pg/ml)", ylab="CHI3L1 (log, ng/ml)", size=0.5)+
+  theme_bw() +
+  theme(axis.title=element_text(color="black", size=font_size, family=plot_font)) +
+  theme(plot.subtitle=element_text(size=font_size, family=plot_font)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank()) +
+  labs(title="R = 0.28, p = 0.0013, N = 132") +
+  theme(plot.title=element_text(size=font_size, family=plot_font))
+plotf<-plotf+theme(axis.text.x=element_text(size=font_size),
+                   axis.text.y=element_text(size=font_size))
+plotf
+#plotf<-ggsave("plotf.png", width=6, height=6, dpi=300)
+```
+
+Descriptive correlation between CSF biomarkers and clinically used CSF hallmarks.
+Linear regression analysis after applying a log10 transformation to biomarker measurements and an inverse rank normal transformation for IgG index, albumin ratio, OCB count and WBC count. Age at LP and gender are included as covariates for outcomes, with the addition of rs150192398 genotype for CHIT1. 
+
+4 clinical variables
+5 biomarkers
+5 covariates - depending on the analysis
+  - GPNMB: age at LP + gender included as covariates
+  - CCL18: age at LP + gender included as covariates
+  - CHIT1: age at LP, gender + rs150192398 included as covariates
+  - CHI3L1: age at LP + gender included as covariates
+  - sTREM2: age at LP + gender included as covariates
+  
+GPNMB, CCL18, CHIT1, CHI3L1, sTREM2: log10 transformation (already completed)
+IgG index, OCB count, WBC count: inverse rank normal transformation
+Inverse rank normal transformation in R if you have missing data:
+y<‐qnorm((rank(x,na.last="keep")‐0.5)/sum(!is.na(x))
+Taken from: Yang, J., Loos, R., Powell, J. et al. FTO genotype is associated with phenotypic variability of body mass index. Nature 490, 267–272 (2012). https://doi.org/10.1038/nature11401
+```{r}
+## Inverse rank normal transformation for clinical variables
+# IgG index
+biomarkerdata<-biomarkerdata %>% add_column(IgG_index_inv = "IgG_index_inv", .after = "IgG_index")
+biomarkerdata$IgG_index_inv<-qnorm((rank(biomarkerdata$IgG_index,na.last="keep")-0.5)/sum(!is.na(biomarkerdata$IgG_index)))
+qplot(biomarkerdata$IgG_index_inv, geom="histogram") #normal distribution
+shapiro.test(biomarkerdata$IgG_index_inv) #normal distribution - p = 0.9975
+
+# OCB count
+# Clean: where OCB count is NA but OCB label = 2, add 1
+biomarkerdata$OCB_count[biomarkerdata$Family_ID==1032]<-1
+biomarkerdata$OCB_count[biomarkerdata$Family_ID==1212]<-1
+biomarkerdata$OCB_count[biomarkerdata$Family_ID==1213]<-1
+biomarkerdata$OCB_count[biomarkerdata$Family_ID==1431]<-1
+# Transformation
+biomarkerdata<-biomarkerdata %>% add_column(OCB_count_inv = "OCB_count_inv", .after = "OCB_count")
+biomarkerdata$OCB_count_inv<-qnorm((rank(biomarkerdata$OCB_count,na.last="keep")-0.5)/sum(!is.na(biomarkerdata$OCB_count)))
+qplot(biomarkerdata$OCB_count_inv, geom="histogram") #normal distribution
+shapiro.test(biomarkerdata$OCB_count_inv) #normal distribution - p = 0.124
+
+# WBC count
+biomarkerdata<-biomarkerdata %>% add_column(WBC_count_inv = "WBC_count_inv", .after = "WBC_count__ul_")
+biomarkerdata$WBC_count_inv<-qnorm((rank(biomarkerdata$WBC_count__ul_,na.last="keep")-0.5)/sum(!is.na(biomarkerdata$WBC_count__ul_)))
+qplot(biomarkerdata$WBC_count_inv, geom="histogram") #normal distribution
+shapiro.test(biomarkerdata$WBC_count_inv) #normal distribution - p = 0.9969
+```
+
+1. IgG index
+```{r}
+## GPNMB + IgG index
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$IgG_index_inv, y=biomarkerdata$GPNMB_log, main="GPNMB ~ IgG index")
+# Linear regression model
+GPNMB_IgGindex_cov<-lm(IgG_index_inv ~ GPNMB_log + age_LP + Gender, data=biomarkerdata)
+summary(GPNMB_IgGindex_cov)
+
+## CCL18 + IgG index
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$IgG_index_inv, y=biomarkerdata$CCL18_log, main="CCL18 ~ IgG index")
+# Linear regression model
+CCL18_IgGindex_cov<-lm(IgG_index_inv ~ CCL18_log + age_LP + Gender, data=biomarkerdata)
+summary(CCL18_IgGindex_cov)
+
+## CHIT1 + IgG index
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$IgG_index_inv, y=biomarkerdata$CHIT1_log, main="CHIT1 ~ IgG index")
+# Linear regression model
+CHIT1_IgGindex_cov<-lm(IgG_index_inv ~ CHIT1_log + age_LP + Gender + rs150192398, data=biomarkerdata)
+summary(CHIT1_IgGindex_cov)
+
+## CHI3L1 + IgG index
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$IgG_index_inv, y=biomarkerdata$CHI3L1_log, main="CHI3L1 ~ IgG index")
+# Linear regression model
+CHI3L1_IgGindex_cov<-lm(IgG_index_inv ~ CHI3L1_log + age_LP + Gender, data=biomarkerdata)
+summary(CHI3L1_IgGindex_cov)
+
+## sTREM2 + IgG index
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$IgG_index_inv, y=biomarkerdata$sTREM2_log, main="sTREM2 ~ IgG index")
+# Linear regression model
+sTREM2_IgGindex_cov<-lm(IgG_index_inv ~ sTREM2_log + age_LP + Gender, data=biomarkerdata)
+summary(sTREM2_IgGindex_cov)
+```
+
+OCB count
+```{r}
+## GPNMB + OCB count
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$OCB_count_inv, y=biomarkerdata$GPNMB_log, main="GPNMB ~ OCB count")
+# Linear regression model
+GPNMB_OCBcount_cov<-lm(OCB_count_inv ~ GPNMB_log + age_LP + Gender, data=biomarkerdata)
+summary(GPNMB_OCBcount_cov)
+
+## CCL18 + OCB count
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$OCB_count_inv, y=biomarkerdata$CCL18_log, main="CCL18 ~ OCB count")
+# Linear regression model
+CCL18_OCBcount_cov<-lm(OCB_count_inv ~ CCL18_log + age_LP + Gender, data=biomarkerdata)
+summary(CCL18_OCBcount_cov)
+
+## CHIT1 + OCB count
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$OCB_count_inv, y=biomarkerdata$CHIT1_log, main="CHIT1 ~ OCB count")
+# Linear regression model
+CHIT1_OCBcount_cov<-lm(OCB_count_inv ~ CHIT1_log + age_LP + Gender + rs150192398, data=biomarkerdata)
+summary(CHIT1_OCBcount_cov)
+
+## CHI3L1 
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$OCB_count_inv, y=biomarkerdata$CHI3L1_log, main="CHI3L1 ~ OCB count")
+# Linear regression model
+CHI3L1_OCBcount_cov<-lm(OCB_count_inv ~ CHI3L1_log + age_LP + Gender, data=biomarkerdata)
+summary(CHI3L1_OCBcount_cov)
+
+## sTREM2 
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$OCB_count_inv, y=biomarkerdata$sTREM2_log, main="sTREM2 ~ OCB count")
+# Linear regression model
+sTREM2_OCBcount_cov<-lm(OCB_count_inv ~ sTREM2_log + age_LP + Gender, data=biomarkerdata)
+summary(sTREM2_OCBcount_cov)
+```
+
+WBC
+```{r}
+## GPNMB + WBC
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$WBC_count_inv, y=biomarkerdata$GPNMB_log, main="GPNMB ~ WBC count")
+# Linear regression model
+GPNMB_WBCcount_cov<-lm(WBC_count_inv ~ GPNMB_log + age_LP + Gender, data=biomarkerdata)
+summary(GPNMB_WBCcount_cov)
+
+## CCL18 + WBC
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$WBC_count_inv, y=biomarkerdata$CCL18_log, main="CCL18 ~ WBC count")
+# Linear regression model
+CCL18_WBCcount_cov<-lm(WBC_count_inv ~ CCL18_log + age_LP + Gender, data=biomarkerdata)
+summary(CCL18_WBCcount_cov)
+
+## CHIT1 + WBC
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$WBC_count_inv, y=biomarkerdata$CHIT1_log, main="CHIT1 ~ WBC count")
+# Linear regression model
+CHIT1_WBCcount_cov<-lm(WBC_count_inv ~ CHIT1_log + age_LP + Gender + rs150192398, data=biomarkerdata)
+summary(CHIT1_WBCcount_cov)
+
+## CHI3L1 
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$WBC_count_inv, y=biomarkerdata$CHI3L1_log, main="CHI3L1 ~ WBC count")
+# Linear regression model
+CHI3L1_WBCcount_cov<-lm(WBC_count_inv ~ CHI3L1_log + age_LP + Gender, data=biomarkerdata)
+summary(CHI3L1_WBCcount_cov)
+
+## sTREM2 
+# Scatterplot
+#scatter.smooth(x=biomarkerdata$WBC_count_inv, y=biomarkerdata$sTREM2_log, main="sTREM2 ~ WBC count")
+# Linear regression model
+sTREM2_WBCcount_cov<-lm(WBC_count_inv ~ sTREM2_log + age_LP + Gender, data=biomarkerdata)
+summary(sTREM2_WBCcount_cov)
+```
+
+Association of CSF biomarkers at diagnosis with single-time point disease activity parameters at follow-up.
+Uncorrected p value from linear regression analysis after applying a logarithmic transformation with base 10 for biomarker measurements and an inverse rank normal transformation for outcome variables. Primary and secondary outcomes are indicated. For CHIT1, age, gender, and rs150192398 genotype were used as covariates.
+
+1. Disability
+Biomarkers = GPNMB, CCL18, CHIT1
+Covariates = age_LP, gender, rs150192398 (CHIT1 only)
+
+a. Primary outcome = ARMSS
+```{r}
+## Clean column names
+names(biomarkerdata)[names(biomarkerdata)=='GPNMB_Mean_log']<-'GPNMB_log'
+names(biomarkerdata)[names(biomarkerdata)=='CCL18_Mean_log']<-'CCL18_log'
+names(biomarkerdata)[names(biomarkerdata)=='YKL40_log']<-'CHI3L1_log'
+
+## GPNMB + ARMSS + Covariates
+# Linear regression model
+GPNMB_ARMSS<-lm(gARMSS_inv ~ GPNMB_log + Gender + age_LP, data=biomarkerdata)
+summary(GPNMB_ARMSS)
+
+## CCL18 + ARMSS + Covariates
+# Linear regression model
+CCL18_ARMSS<-lm(gARMSS_inv ~ CCL18_log + Gender + age_LP, data=biomarkerdata)
+summary(CCL18_ARMSS)
+
+## CHIT1 + ARMSS + Covariates
+# Linear regression model
+CHIT1_ARMSS<-lm(gARMSS_inv ~ CHIT1_log + Gender + age_LP + rs150192398, data=biomarkerdata)
+summary(CHIT1_ARMSS)
+
+## CHI3L1 + ARMSS + Covariates
+# Linear regression model
+CHI3L1_ARMSS<-lm(gARMSS_inv ~ CHI3L1_log + Gender + age_LP, data=biomarkerdata)
+summary(CHI3L1_ARMSS)
+
+## sTREM2 + ARMSS + Covariates
+# Linear regression model
+sTREM2_ARMSS<-lm(gARMSS_inv ~ sTREM2_log + Gender + age_LP, data=biomarkerdata)
+summary(sTREM2_ARMSS)
+```
+
+b. Secondary outcome = MSSS
+```{r}
+## GPNMB + MSSS + Covariates
+# Linear regression model
+GPNMB_MSSS<-lm(uGMSSS_inv ~ GPNMB_log + Gender + age_LP, data=biomarkerdata)
+summary(GPNMB_MSSS)
+
+## CCL18 + MSSS + Covariates
+# Linear regression model
+CCL18_MSSS<-lm(uGMSSS_inv ~ CCL18_log + Gender + age_LP, data=biomarkerdata)
+summary(CCL18_MSSS)
+
+## CHIT1 + MSSS + Covariates
+# Linear regression model
+CHIT1_MSSS<-lm(uGMSSS_inv ~ CHIT1_log + Gender + age_LP + rs150192398, data=biomarkerdata)
+summary(CHIT1_MSSS)
+
+## CHI3L1 + MSSS + Covariates
+# Linear regression model
+CHI3L1_MSSS<-lm(uGMSSS_inv ~ CHI3L1_log + Gender + age_LP, data=biomarkerdata)
+summary(CHI3L1_MSSS)
+
+## sTREM2 + MSSS + Covariates
+# Linear regression model
+sTREM2_MSSS<-lm(uGMSSS_inv ~ sTREM2_log + Gender + age_LP, data=biomarkerdata)
+summary(sTREM2_MSSS)
+```
+
+c. Secondary outcome = EDSS
+```{r}
+## GPNMB + EDSS + Covariates
+# Linear regression model
+GPNMB_EDSS<-lm(edss_inv ~ GPNMB_log + Gender + age_LP, data=biomarkerdata)
+summary(GPNMB_EDSS)
+
+## CCL18 + EDSS + Covariates
+# Linear regression model
+CCL18_EDSS<-lm(edss_inv ~ CCL18_log + Gender + age_LP, data=biomarkerdata)
+summary(CCL18_EDSS)
+
+## CHIT1 + EDSS + Covariates
+# Linear regression model
+CHIT1_EDSS<-lm(edss_inv ~ CHIT1_log + age_LP + Gender + rs150192398, data=biomarkerdata)
+summary(CHIT1_EDSS)
+
+## CHI3L1 + EDSS + Covariates
+# Linear regression model
+CHI3L1_EDSS<-lm(edss_inv ~ CHI3L1_log + Gender + age_LP, data=biomarkerdata)
+summary(CHI3L1_EDSS)
+
+## sTREM2 + EDSS + Covariates
+# Linear regression model
+sTREM2_EDSS<-lm(edss_inv ~ sTREM2_log + Gender + age_LP, data=biomarkerdata)
+summary(sTREM2_EDSS)
+```
+
+2. Relapse
+Biomarkers = GPNMB, CCL18, CHIT1
+Covariates = age_LP, gender, rs150192398 (CHIT1 only)
+
+Normality checks + data transformation
+```{r}
+# Descriptives
+summary(biomarkerdata$ARR)
+# Normality tests
+shapiro.test(biomarkerdata$ARR) #not normally distributed - p = 1.972e-14
+# Distribution
+qplot(biomarkerdata$ARR, geom="histogram") #heavy left skew
+
+## Inverse rank normal transformation for clinical variables
+biomarkerdata<-biomarkerdata %>% add_column(ARR_inv = "ARR_inv", .after = "ARR")
+biomarkerdata$ARR_inv<-qnorm((rank(biomarkerdata$ARR,na.last="keep")-0.5)/sum(!is.na(biomarkerdata$ARR)))
+qplot(biomarkerdata$ARR_inv, geom="histogram") #normal distribution
+shapiro.test(biomarkerdata$ARR_inv) #normal distribution = p = 1
+```
+
+a. Primary outcome = ARR (untreated)
+```{r}
+## GPNMB + AAR + Covariates
+# Linear regression model
+GPNMB_ARR<-lm(ARR_inv ~ GPNMB_log + Gender + age_LP, data=biomarkerdata)
+summary(GPNMB_ARR)
+
+## CCL18 + AAR + Covariates
+# Linear regression model
+CCL18_ARR<-lm(ARR_inv ~ CCL18_log + age_LP + Gender, data=biomarkerdata)
+summary(CCL18_ARR)
+
+## CHIT1 + AAR + Covariates
+# Linear regression model
+CHIT1_ARR<-lm(ARR_inv ~ CHIT1_log + Gender + age_LP + rs150192398, data=biomarkerdata)
+summary(CHIT1_ARR)
+
+## CHI3L1 + AAR + Covariates
+# Linear regression model
+CHI3L1_ARR<-lm(ARR_inv ~ CHI3L1_log + Gender + age_LP, data=biomarkerdata)
+summary(CHI3L1_ARR)
+
+## sTREM2 + AAR + Covariates
+# Linear regression model
+sTREM2_ARR<-lm(ARR_inv ~ sTREM2_log + Gender + age_LP, data=biomarkerdata)
+summary(sTREM2_ARR)
+```
+
+**Corrections for multiple testing: Bonferroni corrections**
+We applied a Bonferroni correction for multiple testing, assuming 5 independent biomarkers correlated with 4 independent primary outcomes.
+
+To get the Bonferroni corrected/adjusted p value, divide the original p-value by the number of analyses on the dependent variable.
+5 x 4 = 20
+0,05/20 = 0,0025
+We applied a Bonferroni correction for multiple testing, assuming 5 independent biomarkers correlated with 4 independent primary outcomes, resulting in a threshold of p ≤ 0.0025. 
+a - Uncorrected p ≤ 0.0025, passed Bonferroni correction for multiple testing of primary outcomes.
+b - Nominally significant p values (uncorrected p < 0.05).
+
+Multiple linear regression of CSF biomarkers with single-time point disease activity parameters at follow-up.
+```{r}
+## Disability
+# ARMSS
+disability_multireg1<-lm(gARMSS_inv ~ CHIT1_log + GPNMB_log + CCL18_log + Gender + age_LP + rs150192398, data=biomarkerdata)
+summary(disability_multireg1)
+
+# MSSS
+disability_multireg2<-lm(uGMSSS_inv ~ CHIT1_log + GPNMB_log + CCL18_log + Gender + age_LP + rs150192398, data=biomarkerdata)
+summary(disability_multireg2)
+
+# EDSS
+disability_multireg3<-lm(edss_inv ~ CHIT1_log + GPNMB_log + CCL18_log + Gender + age_LP + rs150192398, data=biomarkerdata)
+summary(disability_multireg3)
+
+## Relapse
+relapse_multireg<-lm(ARR_inv ~ CHIT1_log + GPNMB_log + CCL18_log + Gender + age_LP + rs150192398, data=biomarkerdata)
+summary(relapse_multireg)
+```
+
+Additional checks on CHIT1 for disability
+```{r}
+# Regression model
+CHIT1_ARMSS<-lm(gARMSS ~ CHIT1_log, data=biomarkerdata)
+summary(CHIT1_ARMSS)
+#Explains 9% of the variance
+# Regression model with covariates
+CHIT1_ARMSS_cov<-lm(gARMSS ~ CHIT1_log + age_LP + Gender + rs150192398, data=biomarkerdata)
+summary(CHIT1_ARMSS_cov)
+#Explains 11% of the variance
+```
+
+```{r}
+## Create binary ARMSS score: two groups - fast progressors (ARMSS ≥ 5 = 1) and slow progressors (ARMSS < 5 = 0) 
+biomarkerdata<-biomarkerdata %>% add_column(gARMSS_bin = "gARMSS_bin", .after = "gARMSS")
+biomarkerdata$gARMSS_bin[biomarkerdata$gARMSS<5]<-0
+biomarkerdata$gARMSS_bin[biomarkerdata$gARMSS>=5]<-1
+biomarkerdata$gARMSS_bin[biomarkerdata$gARMSS_bin=="gARMSS_bin"]<-NA
+biomarkerdata$gARMSS_bin<-factor(biomarkerdata$gARMSS_bin, levels=c('0','1'), labels=c('ARMSS < 5','ARMSS ≥ 5'))
+summary(biomarkerdata$gARMSS_bin)
+
+# Time from LP to EDSS
+#Calculated previously
+biomarkerdata$Time_LP_to_EDSS
+
+## Only keep patients with CHIT1 and ARMSS data
+biomarkerdata1<-biomarkerdata[!is.na(biomarkerdata$CHIT1_log), ]  #180
+biomarkerdata2<-biomarkerdata1[!is.na(biomarkerdata1$gARMSS), ]  #160
+biomarkerdata2<-biomarkerdata2 %>% select (c(gARMSS_bin, CHIT1_log, Gender, age_onset, Disease_course)) #5 variables
+biomarkerdata2<-biomarkerdata2[!is.na(biomarkerdata2$age_onset),]  #157
+biomarkerdata2$age_onset<-as.numeric(biomarkerdata2$age_onset)
+
+## Logistic regression for difference between fast and slow ARMSS progressors
+# With covariates
+logreg_ARMSS_bin1<-glm(biomarkerdata2$gARMSS_bin ~ biomarkerdata2$CHIT1_log + biomarkerdata2$Gender + biomarkerdata2$age_onset + biomarkerdata2$Disease_course, family=binomial)
+summary(logreg_ARMSS_bin1)
+summ(logreg_ARMSS_bin1)
+#P value for CHIT in binary ARMSS logistic model is 0.000261
+# Without covariates
+logreg_ARMSS_bin2<-glm(biomarkerdata2$gARMSS_bin ~ biomarkerdata2$CHIT1_log, family=binomial)
+summary(logreg_ARMSS_bin2)
+probabilities1<-logreg_ARMSS_bin1$fitted.values
+probabilities2<-logreg_ARMSS_bin2$fitted.values
+
+## Scatterplot of differences between fast and slow disability progressors
+# Set font
+font_name<-"MyriadPro"  # Replace "MyFont" with the desired font name
+font_size<-36
+# Plot
+fig1e<-ggplot(biomarkerdata2, aes(x=gARMSS_bin, y=CHIT1_log)) +
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=0.3, stackratio=1.8, color="#43AA8C", fill="#43AA8C") +
+  theme_bw() +
+  xlab("ARMSS") + ylab("CHIT1 (pg/ml, log)") +
+  theme(panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=24, family=font_name),
+        axis.text=element_text(size=font_size, family=font_name),
+        axis.title=element_text(color="black", size=font_size, family=font_name),
+        axis.title.x=element_text(margin=margin(t=10), vjust=1),
+        axis.title.y=element_text(margin=margin(r=10), vjust=1)) +
+  scale_x_discrete(labels=c(expression("ARMSS" < 5), expression("ARMSS" >= 5))) +
+  stat_summary(fun.data=mean_sdl, fun.args=list(mult=1),
+               geom="errorbar", color="black", width=0.5, lwd=0.3) +
+  geom_segment(aes(x=1.0, xend=2.0, y=5.2, yend=5.2), size=0.3) +
+  geom_segment(aes(x=0.7, xend=1.3, y=3.519, yend=3.519), size=0.3) +
+  geom_segment(aes(x=1.7, xend=2.3, y=4.05, yend=4.05), size=0.3) +
+  annotate(geom="text", x=1.5, y=5.3, label="p = 0.000261", size=12)
+fig1e
+fig1e<-ggsave("fig1e.png", width=6, height=6, dpi=300)
+
+# ROC curve 1
+par(pty="s")
+roc1 <- roc(biomarkerdata2$gARMSS_bin, probabilities1/100, plot=TRUE, colour="black", lwd=1, legacy.axes=TRUE, percent=TRUE, xlab="False Positive Percentage", ylab="True Positive Percentage")
+roc1
+ci(roc1)
+#Area under the curve: 79.28%
+#95% CI: 69.83%-88.72% 
+
+# ROC curve 2
+par(pty="s")
+roc2 <- roc(biomarkerdata2$gARMSS_bin, probabilities2/100, plot=TRUE, colour="black", lwd=1, legacy.axes=TRUE, percent=TRUE, xlab="False Positive Percentage", ylab="True Positive Percentage")
+roc2
+ci(roc2)
+#Area under the curve: 70.07%
+#95% CI: 59.41%-80.73%
+
+## Plot
+# Set font
+font_name<-"MyriadPro"  #Replace "MyFont" with the desired font name
+font_size<-1.5
+png(file="/Volumes/shares/GBW-0089_Neuroimmunology/Sinéad/Biomarkers/fig1f_updated.png", width=1000, height=1000)
+# Plotting ROC curves with different colors
+par(pty="s", family=font_name, cex=font_size)
+plot(roc1, col="#43AA8B", print.thres=FALSE, xlim=c(100, 0),
+     xlab="False Positive Percentage", ylab="True Positive Percentage")
+plot(roc2, col="#90BE6D", add=TRUE, print.thres=FALSE, lty="dashed", xlim=c(100, 0))
+# Add custom annotations
+text(55, 12, "CHIT1 with covariates", pos=4, cex=font_size, col="#43AA8B")
+text(55, 7.5, "AUC = 79.3%", pos=4, cex=font_size, col="#43AA8B")
+text(55, 2, "CHIT1 only, AUC = 70.1%", pos=4, cex=font_size, col="#90BE6D")
+dev.off()
+```
+
+```{r}
+#install.packages("plyr")
+#install.packages("dplyr")
+#install.packages("tidyverse")
+#install.packages("lubridate")
+#install.packages("lmerTest")
+#install.packages("jtools")
+#install.packages("flexplot")
+#install.packages("ICC")
+#install.packages("ggstance")
+#install.packages("sjPlot")
+#install.packages("afex")
+#install.packages("optimx")
+#install.packages("dfoptim")
+#install.packages("viridis")
+#install.packages("ms.sev")
+#install.packages("scatterplot3d")
+#install.packages("lcsm")
+
+library(plyr)
+library(dplyr)
+library(psych)
+library(tidyverse)
+library(lubridate)
+library(lme4)
+library(ggplot2)
+library(jtools)
+library(ggstance)
+library(sjPlot)
+library(afex)
+library(optimx)
+library(dfoptim)
+library(viridis)
+library(ms.sev)
+library(scatterplot3d)
+library(lcsm)
+
+#options(scipen=999)
+
+#sessionInfo()
+```
+
+## Mixed model plan -----------------------------------------------------------
+Plan
+1. Data in wide format
+	 Time variable in years starting at 0 from date of onset and diagnosis
+2. Fit regular linear model
+3. Fit mixed effect model with random intercept and fixed slope
+4. Fit mixed effect model with random intercept and random slope
+5. Fit mixed effect model with random intercept and random slope, and interaction term for CHIT1 and time 
+6. Study estimates (fixed effects)
+	 AIC, BIC, base factor, p values, predicted differences between the two models, values 
+	 of the fixed effects themselves
+
+## Data preparation + descriptives -----------------------------------------------------------
+Import final data file from previous analyses for covariates
+```{r}
+setwd("/Volumes/shares/GBW-0089_Neuroimmunology/Sinéad/Biomarkers/Longitudinal analysis/Mixed model")
+finaldata<-read.table("allbiomarkerdata_06.01.2023.txt", header=TRUE, sep="\t", dec = ".") #192
+# Remove unnecessary columns
+mixedmodel_cov<-finaldata %>% select (c(Family_ID, Individual_ID, CHIT1_log, Gender, Ethnicity, Birth_date, Date_Onset, age_onset, Disease_course, Datum_LP, disease_duration_LP, Date_last_visit)) #192
+# Clean columns
+names(mixedmodel_cov)[names(mixedmodel_cov)=="Gender"]<-"Sex"
+mixedmodel_cov$Sex<-as.factor(mixedmodel_cov$Sex)
+mixedmodel_cov$Disease_course<-as.factor(mixedmodel_cov$Disease_course)
+mixedmodel_cov$Ethnicity<-as.factor(mixedmodel_cov$Ethnicity)
+mixedmodel_cov$Birth_date<-as.Date(mixedmodel_cov$Birth_date, format = "%Y-%m-%d")
+mixedmodel_cov$Date_Onset<-as.Date(mixedmodel_cov$Date_Onset, format = "%Y-%m-%d")
+mixedmodel_cov$Datum_LP<-as.Date(mixedmodel_cov$Datum_LP, format = "%Y-%m-%d")
+mixedmodel_cov$Date_last_visit<-as.Date(mixedmodel_cov$Date_last_visit, format = "%d/%m/%Y")
+```
+
+Import raw EDSS data
+```{r}
+setwd("/Volumes/shares/GBW-0089_Neuroimmunology/Sinéad/Biomarkers/Longitudinal analysis/Mixed model")
+edssraw<-read.table("edss_cleaned.txt", header=TRUE, sep="\t", dec = ",") #400
+# Clean columns
+edssraw<-plyr::rename(edssraw, c("EDSS_Measurement" = "EDSS_Order"))
+edssraw$EDSS_Order<-as.numeric(edssraw$EDSS_Order)
+edssraw<-plyr::rename(edssraw, c("Date_EDSS" = "EDSS_Date"))
+edssraw$EDSS_Date<-as.Date(edssraw$EDSS_Date, format = "%d/%m/%Y")
+```
+
+Combine
+```{r}
+edss_long<-merge(mixedmodel_cov,edssraw, by=c("Family_ID", "Individual_ID")) #400
+```
+
+Calculate time: Time from onset to EDSS score
+```{r}
+# Time: Onset to EDSS
+edss_long<-edss_long %>% add_column(Time_Onset_EDSS = "Time_Onset_EDSS", .after = "EDSS_Date")
+edss_long$Time_Onset_EDSS<-round(time_length(difftime(edss_long$EDSS_Date, edss_long$Date_Onset), "years"), 2)
+
+# Time: Diagnosis/LP to EDSS
+edss_long<-edss_long %>% add_column(Time_LP_EDSS = "Time_LP_EDSS", .after = "EDSS_Date")
+edss_long$Time_LP_EDSS<-round(time_length(difftime(edss_long$EDSS_Date, edss_long$Datum_LP), "years"), 2)
+
+# Calculate ARMSS score
+#Disease duration from onset to last visit
+edss_long<-edss_long %>% add_column(disease_duration = "disease_duration", .after = "Date_last_visit")
+edss_long$disease_duration<-round(time_length(difftime(edss_long$Date_last_visit, edss_long$Date_Onset), "years"), 2)
+#Calculate age at EDSS
+edss_long<-edss_long %>% add_column(ageatedss = "ageatedss", .after = "EDSS")
+edss_long$ageatedss<-round(time_length(difftime(edss_long$EDSS_Date, edss_long$Birth_date), "years"), 2)
+# Rename columns for ms.sev
+  # Disease duration = dd
+  # EDSS score = edss
+  # Age at EDSS score = ageatedss
+edss_long<-plyr::rename(edss_long, c("disease_duration" = "dd"))
+edss_long<-plyr::rename(edss_long, c("EDSS" = "edss"))
+# Calculate global_armss
+edss_long1<-global_armss(edss_long)
+edss_long<-edss_long %>% add_column(gARMSS = "1", .after = "edss")
+edss_long<-do.call(rbind.data.frame, edss_long1)
+# Calculate local_armss
+edss_long<-local_armss(edss_long)
+
+# Rename
+edss_long<-plyr::rename(edss_long, c("dd" = "disease_duration"))
+```
+
+## Descriptives -----------------------------------------------------------
+Descriptives: Overall + at each time point
+```{r}
+## EDSS: All
+# Descriptives
+summary(edss_long$edss)
+# Normality tests
+shapiro.test(edss_long$edss) #not normally distributed - p < 2.2e-16
+# Distribution
+qplot(edss_long$edss, geom="histogram") #heavy left skew
+boxplot(edss_long$edss,ylab = "EDSS")
+
+## EDSS: 1
+edss_long_1<-subset(edss_long, EDSS_Order %in% c("1"))
+# Descriptives
+summary(edss_long_1$edss)
+# Normality tests
+shapiro.test(edss_long_1$edss) #not normally distributed - p = 2.642e-13
+# Distribution
+qplot(edss_long_1$edss, geom="histogram") #heavy left skew
+
+## EDSS: 2
+edss_long_2<-subset(edss_long, EDSS_Order %in% c("2"))
+# Descriptives
+summary(edss_long_2$edss)
+# Normality tests
+shapiro.test(edss_long_2$edss) #not normally distributed - p = 3.116e-09
+# Distribution
+qplot(edss_long_2$edss, geom="histogram") #heavy left skew
+
+## EDSS: 3
+edss_long_3<-subset(edss_long, EDSS_Order %in% c("3"))
+# Descriptives
+summary(edss_long_3$edss)
+# Normality tests
+shapiro.test(edss_long_3$edss) #not normally distributed - p = 6.161e-06
+# Distribution
+qplot(edss_long_3$edss, geom="histogram") #heavy left skew
+
+## EDSS: 4
+edss_long_4<-subset(edss_long, EDSS_Order %in% c("4"))
+# Descriptives
+summary(edss_long_4$edss)
+# Normality tests
+shapiro.test(edss_long_4$edss) #not normally distributed - p = 0.008913
+# Distribution
+qplot(edss_long_4$edss, geom="histogram") #heavy left skew
+
+## EDSS: 5
+edss_long_5<-subset(edss_long, EDSS_Order %in% c("5"))
+# Descriptives
+summary(edss_long_5$edss)
+# Normality tests
+shapiro.test(edss_long_5$edss) #normally distributed - p = 0.5098
+# Distribution
+qplot(edss_long_5$edss, geom="histogram") #Trimodal
+
+## ARMSS: All
+# Descriptives
+summary(edss_long$gARMSS)
+## ARMSS: 1
+summary(edss_long_1$gARMSS)
+## ARMSS: 2
+summary(edss_long_2$gARMSS)
+## ARMSS: 3
+summary(edss_long_3$gARMSS)
+## ARMSS: 4
+summary(edss_long_4$gARMSS)
+## ARMSS: 5
+summary(edss_long_5$gARMSS)
+
+## Disease duration: All: onset to last update
+# Descriptives
+summary(edss_long$disease_duration)
+## Disease duration: 1
+summary(edss_long_1$disease_duration)
+## Disease duration: 2
+summary(edss_long_2$disease_duration)
+## Disease duration: 3
+summary(edss_long_3$disease_duration)
+## Disease duration: 4
+summary(edss_long_4$disease_duration)
+## Disease duration: 5
+summary(edss_long_5$disease_duration)
+
+## Time Onset to EDSS
+## Time Onset to EDSS: 1
+# Descriptives
+summary(edss_long_1$Time_Onset_EDSS)
+# Normality tests
+shapiro.test(edss_long_1$Time_Onset_EDSS) #not normally distributed - p < 2.2e-16
+# Distribution
+qplot(edss_long_1$Time_Onset_EDSS, geom="histogram") #heavy left skew
+
+## Time Onset to EDSS: 2
+# Descriptives
+summary(edss_long_2$Time_Onset_EDSS)
+# Normality tests
+shapiro.test(edss_long_2$Time_Onset_EDSS) #not normally distributed - p = 5.882e-11
+# Distribution
+qplot(edss_long_2$Time_Onset_EDSS, geom="histogram") #heavy left skew
+
+## Time Onset to EDSS: 3
+# Descriptives
+summary(edss_long_3$Time_Onset_EDSS)
+# Normality tests
+shapiro.test(edss_long_3$Time_Onset_EDSS) #not normally distributed - p = 2.084e-08
+# Distribution
+qplot(edss_long_3$Time_Onset_EDSS, geom="histogram") #heavy left skew
+
+## Time Onset to EDSS: 4
+# Descriptives
+summary(edss_long_4$Time_Onset_EDSS)
+# Normality tests
+shapiro.test(edss_long_4$Time_Onset_EDSS) #not normally distributed - p = 2.624e-06
+# Distribution
+qplot(edss_long_4$Time_Onset_EDSS, geom="histogram") #heavy left skew
+
+## Time Onset to EDSS: 5
+# Descriptives
+summary(edss_long_5$Time_Onset_EDSS)
+# Normality tests
+shapiro.test(edss_long_5$Time_Onset_EDSS) #normally distributed - p = 0.7556
+# Distribution
+qplot(edss_long_5$Time_Onset_EDSS, geom="histogram")
+
+## Time LP to EDSS
+# Remove individuals where the time from LP to EDSS is less than zero (aka the EDSS score was taken before diagnosis)
+edss_long_LPEDSS<-edss_long[edss_long$Time_LP_EDSS >= 0, ]
+#Rows with only NAs included - remove
+edss_long_LPEDSS<-edss_long_LPEDSS[!is.na(edss_long_LPEDSS$Family_ID),]
+
+## Time LP to EDSS: 1
+edss_long_LPEDSS_1<-subset(edss_long_LPEDSS, EDSS_Order %in% c("1"))
+# Descriptives
+summary(edss_long_LPEDSS_1$Time_LP_EDSS)
+# Normality tests
+shapiro.test(edss_long_LPEDSS_1$Time_LP_EDSS) #not normally distributed - p < 6.689e-13
+# Distribution
+qplot(edss_long_LPEDSS_1$Time_LP_EDSS, geom="histogram") #heavy left skew
+
+## Time: 2
+edss_long_LPEDSS_2<-subset(edss_long_LPEDSS, EDSS_Order %in% c("2"))
+# Descriptives
+summary(edss_long_LPEDSS_2$Time_LP_EDSS)
+# Normality tests
+shapiro.test(edss_long_LPEDSS_2$Time_LP_EDSS) #not normally distributed - p = 0.0009017
+# Distribution
+qplot(edss_long_LPEDSS_2$Time_LP_EDSS, geom="histogram") #left skew
+
+## Time: 3
+edss_long_LPEDSS_3<-subset(edss_long_LPEDSS, EDSS_Order %in% c("3"))
+# Descriptives
+summary(edss_long_LPEDSS_3$Time_LP_EDSS)
+# Normality tests
+shapiro.test(edss_long_LPEDSS_3$Time_LP_EDSS) #not normally distributed - p = 0.1909
+# Distribution
+qplot(edss_long_LPEDSS_3$Time_LP_EDSS, geom="histogram") #normally distributed
+
+## Time: 4
+edss_long_LPEDSS_4<-subset(edss_long_LPEDSS, EDSS_Order %in% c("4"))
+# Descriptives
+summary(edss_long_LPEDSS_4$Time_LP_EDSS)
+# Normality tests
+shapiro.test(edss_long_LPEDSS_4$Time_LP_EDSS) #not normally distributed - p = 0.2982
+# Distribution
+qplot(edss_long_LPEDSS_4$Time_LP_EDSS, geom="histogram") #right skew
+
+## Time: 5
+edss_long_LPEDSS_5<-subset(edss_long_LPEDSS, EDSS_Order %in% c("5"))
+# Descriptives
+summary(edss_long_LPEDSS_5$Time_LP_EDSS)
+# Normality tests
+shapiro.test(edss_long_LPEDSS_5$Time_LP_EDSS) #normally distributed - p = 0.5884
+# Distribution
+qplot(edss_long_LPEDSS_5$Time_LP_EDSS, geom="histogram")
+```
+
+## Transformations -----------------------------------------------------------
+CHIT1: Already in log transformation
+EDSS: inverse normal rank transformation
+```{r}
+# Time onset to EDSS
+edss_long<-edss_long %>% add_column(EDSS_inv="edss_inv", .after="edss")
+edss_long$EDSS_inv<-qnorm((rank(edss_long$edss,na.last="keep")-0.5)/sum(!is.na(edss_long$edss)))
+qplot(edss_long$EDSS_inv, geom="histogram") #left skew
+shapiro.test(edss_long$EDSS_inv) #not normally distributed - p = 5.51e-13
+boxplot(edss_long$EDSS_inv,ylab = "EDSS")
+
+# Time LP to EDSS
+edss_long_LPEDSS<-edss_long_LPEDSS %>% add_column(EDSS_inv="edss_inv", .after="edss")
+edss_long_LPEDSS$EDSS_inv<-qnorm((rank(edss_long_LPEDSS$edss,na.last="keep")-0.5)/sum(!is.na(edss_long_LPEDSS$edss)))
+qplot(edss_long_LPEDSS$EDSS_inv, geom="histogram") #left skew
+shapiro.test(edss_long_LPEDSS$EDSS_inv) #not normally distributed - p = 9.124e-13
+boxplot(edss_long_LPEDSS$EDSS_inv,ylab = "EDSS")
+```
+
+## Mixed models -----------------------------------------------------------
+Focus on models from diagnosis to EDSS
+Covariates: sex + age_LP
+```{r}
+# Calculate age at LP
+edss_long_LPEDSS<-edss_long_LPEDSS %>% add_column(Age_LP = "Age_LP", .after = "Datum_LP")
+edss_long_LPEDSS$Age_LP<-lubridate::time_length(difftime(edss_long_LPEDSS$Datum_LP, edss_long_LPEDSS$Birth_date), "years")
+
+# Remove rows with NAs from edss_long_LPEDSS
+edss_long_LPEDSS<-edss_long_LPEDSS %>% drop_na(Family_ID)
+```
+
+1. Positive controls: Models + figures
+a. EDSS x Time (diagnosis/LP) by gender
+```{r}
+# Create smaller data-frame for plot
+edss_plot_LP_gender<-edss_long_LPEDSS %>% select (c(Family_ID, Individual_ID, Sex, Datum_LP, Time_LP_EDSS, Age_LP, age_onset, edss, EDSS_inv))
+edss_plot_LP_gender$Sex<-as.factor(edss_plot_LP_gender$Sex)
+edss_plot_LP_gender$age_onset<-as.numeric(edss_plot_LP_gender$age_onset)
+
+# Change settings
+#install.packages("viridis")
+#library(viridis)
+#theme_set(theme_minimal() + theme(legend.position = "right"))
+
+# Plot
+fig0.1<-ggplot(edss_plot_LP_gender, aes(y = edss, x = Time_LP_EDSS, colour = Sex, shape = Sex))+
+  geom_point(aes(color=Sex), shape=20) +
+  geom_smooth(aes(color=Sex, fill=Sex), method = "lm") +
+  labs(x="Time from MS diagnosis to EDSS score", y="EDSS") +
+  scale_color_viridis(discrete = TRUE, option = "E")+
+  scale_fill_viridis(discrete = TRUE) 
+fig0.1
+fig0.1<-ggsave("fig0.1.pdf", width=8, height=6)
+
+# Model
+m0.1<-lm(EDSS_inv ~ Sex + Time_LP_EDSS, data = edss_plot_LP_gender, na.action = na.omit)
+summary(m0.1)
+summ(m0.1, digits=10)
+```
+
+b. EDSS x Time (diagnosis/LP) with age at onset
+```{r}
+pdf(file="/Volumes/shares/GBW-0089_Neuroimmunology/Sinéad/Biomarkers/Longitudinal analysis/Mixed model/fig0.2a.pdf", width=6, height=6)
+pairs(~edss + Time_LP_EDSS + age_onset, data = edss_plot_LP_gender, panel=function(x,y){
+  points(x,y)
+  abline(lm(y~x), col='red')
+  text(0,1.5,labels = paste('R2=',round((cor(x,y))^2,2)) ,col='red' )
+})
+dev.off()
+
+Time_LP<-edss_plot_LP_gender$Time_LP_EDSS
+Age_onset<-edss_plot_LP_gender$age_onset
+EDSS<-edss_plot_LP_gender$EDSS
+pdf(file="/Volumes/shares/GBW-0089_Neuroimmunology/Sinéad/Biomarkers/Longitudinal analysis/Mixed model/fig0.2b.pdf", width=8, height=6)
+fig0.2b<-scatterplot3d(Time_LP, Age_onset, EDSS, pch = 19, color = "blue")
+fig0.2b_lm<-lm(edss_plot_LP_gender$EDSS_inv ~ edss_plot_LP_gender$age_onset + edss_plot_LP_gender$Time_LP_EDSS)
+fig0.2b$plane3d(fig0.2b_lm)
+dev.off()
+
+# Model
+m0.2<-lm(EDSS_inv ~ age_onset + Time_LP_EDSS, data = edss_plot_LP_gender, na.action = na.omit)
+summary(m0.2)
+summ(m0.2,digits=10)
+```
+
+c. EDSS x Time (diagnosis/LP) with age at diagnosis
+```{r}
+pdf(file="/Volumes/shares/GBW-0089_Neuroimmunology/Sinéad/Biomarkers/Longitudinal analysis/Mixed model/fig0.3a.pdf", width=6, height=6)
+pairs(~edss + Time_LP_EDSS + Age_LP, data = edss_plot_LP_gender, panel=function(x,y){
+  points(x,y)
+  abline(lm(y~x), col='red')
+  text(0,1.5,labels = paste('R2=',round((cor(x,y))^2,2)) ,col='red' )
+})
+dev.off()
+
+Time_LP<-edss_plot_LP_gender$Time_LP_EDSS
+Age_LP<-edss_plot_LP_gender$Age_LP
+EDSS<-edss_plot_LP_gender$edss
+pdf(file="/Volumes/shares/GBW-0089_Neuroimmunology/Sinéad/Biomarkers/Longitudinal analysis/Mixed model/fig0.3b.pdf", width=8, height=6)
+fig0.3b<-scatterplot3d(Time_LP, Age_LP, EDSS, pch = 19, color = "blue")
+fig0.3b_lm<-lm(edss_plot_LP_gender$EDSS_inv ~ edss_plot_LP_gender$Age_LP + edss_plot_LP_gender$Time_LP_EDSS)
+fig0.3b$plane3d(fig0.3b_lm)
+dev.off()
+
+# Model
+m0.3<-lm(EDSS_inv ~ Age_LP + Time_LP_EDSS, data = edss_plot_LP_gender, na.action = na.omit)
+summary(m0.3)
+summ(m0.3,digits=10)
+```
+
+2. Mixed models
+Random effect 1: Participant
+Random effect 2: Time – years from diagnosis to EDSS score
+IV: CHIT1
+DV: EDSS scores
+Note: I’m assuming there has to be random coefficients to allow people starting at different EDSS scores. If people have increasing and decreasing EDSS scores, it will allow to examine interactions
+-	Random intercept + fixed slope: (1|Subject)
+-	Random intercept + random slope: (Time|Subject)
+-	Fixed effects: sex, age, time, interaction effect between age and time
+Note: REML is set to FALSE for all models for two reasons:
+1. Within model 1, there is only one random effect.
+2. The fixed effects change in model 3 (inclusion of interaction effect) and it is not possible to compare across models is REML = TRUE.
+REML needs to be consistent across all three models so that we can complete comparison and it can't be REML = TRUE in the first model (because only one random effect). Therefore, it had to be RMEL = FALSE.
+
+a. 3D Plot: EDSS across time with CHIT1
+```{r}
+
+`Time from diagnostic LP` <- edss_long_LPEDSS$Time_LP_EDSS
+`CHIT1 at diagnostic LP` <- edss_long_LPEDSS$CHIT1_log
+EDSS <- edss_long_LPEDSS$edss
+png("3D Scatterplot.png", height = 5, width = 7, units = "in", res = 300)
+Plot <- scatterplot3d(`CHIT1 at diagnostic LP`, `Time from diagnostic LP`, EDSS, color = "#43AA8B", box = FALSE)
+source('http://www.sthda.com/sthda/RDoc/functions/addgrids3d.r')
+addgrids3d(x = `CHIT1 at diagnostic LP`, y = `Time from diagnostic LP`, z = EDSS, grid = c("xy", "xz", "yz"))
+Plot$points3d(x = `CHIT1 at diagnostic LP`, y = `Time from diagnostic LP`, z = EDSS, col = "#43AA8B", pch = 16)
+Regression_Plane <- lm(EDSS ~ `CHIT1 at diagnostic LP` + `Time from diagnostic LP`)
+Regression_Plane
+Plot$plane3d(Regression_Plane, draw_polygon = TRUE)
+dev.off()
+```
+
+b. Regular regression model - intercept only model
+```{r}
+# Remove EDSS scores that occur before date of diagnosis (Datum_LP) = negative Time_LP_EDSS scores
+#Already removed
+# Model
+m0.4<-lm(EDSS_inv ~ CHIT1_log + Time_LP_EDSS + Age_LP + Sex, data = edss_long_LPEDSS, na.action = na.omit)
+# Model summary
+summary(m0.4)
+summ(m0.4)
+AIC(m0.4)
+BIC(m0.4)
+# Plotting the model
+plot_model(m0.4, sort.est = TRUE, transform = NULL, show.values = TRUE, value.offset = .3)
+```
+Note: Not taking into account repeated measures from individuals. Therefore, EDSS scores are correlated and the model is not taking this into account. The estimates may not be bad but the standard errors will be. 
+
+c. Scale variables
+CHIT1_log, time and age scaled in order to fit models better and avoid convergence errors.
+Rule of thumb: complete tranformation first (e.g. log), then scale
+```{r}
+## Time from diagnosis/LP to EDSS
+edss_long_LPEDSS<-edss_long_LPEDSS %>% add_column(Age_LP_scale = "Age_LP_scale", .after = "Age_LP")
+edss_long_LPEDSS$Age_LP_scale<-scale(edss_long_LPEDSS$Age_LP)
+edss_long_LPEDSS<-edss_long_LPEDSS %>% add_column(Time_LP_EDSS_scale = "Time_LP_EDSS_scale", .after = "Time_LP_EDSS")
+edss_long_LPEDSS$Time_LP_EDSS_scale<-scale(edss_long_LPEDSS$Time_LP_EDSS)
+edss_long_LPEDSS<-edss_long_LPEDSS %>% add_column(CHIT1_log_scale = "CHIT1_log_scale", .after = "CHIT1_log")
+edss_long_LPEDSS$CHIT1_log_scale<-scale(edss_long_LPEDSS$CHIT1_log)
+```
+
+d. Model 1: Random intercept (individual) + fixed slope (time)
+(1 | individual): random term for individuals to account for multiple data coming from one individual
+```{r}
+# Model
+m1<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + Age_LP_scale + Sex + (1 | Family_ID), data = edss_long_LPEDSS, REML = FALSE, na.action = na.omit)
+# Check model convergence
+all_fit(m1)    #No convergence warnings so good to go
+# Model summary
+summary(m1)
+summ(m1, digits=5)
+confint(m1)
+# Plotting predictions
+#Predictions can't be calculated when the predicted values are greater (258) than the number of variables in the model (259). To get around this I removed all NAs, then reran the model using the NA dataframe before plotting predictions. 
+edss_long_LPEDSSna<-na.omit(edss_long_LPEDSS)
+m1na<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + Age_LP_scale + Sex + (1 | Family_ID), data = edss_long_LPEDSSna, REML = FALSE, na.action = na.omit) 
+m1_preds<-data.frame(time=edss_long_LPEDSSna$Time_LP_EDSS,pred=fitted(m1na),subject=edss_long_LPEDSSna$Family_ID)
+m1_preds_plot<-ggplot(data=m1_preds,aes(x=time,y=pred,group=subject,color=subject))+theme_classic()+geom_line()
+m1_preds_plot
+# Plotting the model
+plot_model(m1, sort.est=TRUE, transform=NULL, show.values=TRUE, value.offset=.3)
+```
+Note: Model is taking into account repeated measures from individuals. However, not accounting for the difference in time among EDSS scores. 
+
+e. Model 2: Random intercept (individual) + random slope (time)
+(time | individual): random term for individuals to account for multiple data coming from one individual + random term for time - slope associated with each time
+```{r}
+# Model
+m2<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + Age_LP_scale + Sex + (Time_LP_EDSS_scale | Family_ID), data = edss_long_LPEDSS, REML = FALSE, na.action = na.omit)
+# Check model convergence
+all_fit(m2)    #No convergence warnings so good to go
+# Model summary
+summary(m2)
+summ(m2,digits=5)
+confint(m2)
+# Plotting predictions
+#Predictions can't be calculated when the predicted values are greater (258) than the number of variables in the model (259). To get around this I removed all NAs, then reran the model using the NA dataframe before plotting predictions. 
+m2na<-lmer(EDSS_inv ~ CHIT1_log + Time_LP_EDSS + Age_LP + Sex + (Time_LP_EDSS | Family_ID), data = edss_long_LPEDSSna, REML = FALSE, na.action = na.omit)
+m2_preds<-data.frame(time=edss_long_LPEDSSna$Time_LP_EDSS,pred=fitted(m2na),subject=edss_long_LPEDSSna$Family_ID)
+m2_preds_plot<-ggplot(data=m2_preds,aes(x=time,y=pred,group=subject,color=subject))+theme_classic()+geom_line()
+m2_preds_plot
+# Plotting the model
+plot_model(m2, sort.est=TRUE, transform=NULL, show.values=TRUE, value.offset=.3)
+```
+
+f. Comparing models: m1 + m2
+```{r}
+#Rerun original models before completing comparison (aka models before NAs removed for plotting predictions)
+anova(m1,m2)
+```
+There is a significant difference between the models. Adding a random slope did make the model fitting significantly better. Therefore, we keep the random slope in the final model. 
+
+g. Model 3: Including interaction between biomarker + time (biomarker x time)
+```{r}
+# Model
+m3<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + CHIT1_log_scale*Time_LP_EDSS_scale + Age_LP_scale + Sex + (Time_LP_EDSS_scale | Family_ID), data = edss_long_LPEDSS, REML = FALSE, na.action = na.omit)
+# Check model convergence
+all_fit(m3)   #No convergence warnings so good to go
+# Model summary
+summary(m3)
+summ(m3,digits=5)
+confint(m3)
+# Plotting predictions
+#Predictions can't be calculated when the predicted values are greater (258) than the number of variables in the model (259). To get around this I removed all NAs, then reran the model using the NA dataframe before plotting predictions. 
+m3na<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + CHIT1_log_scale*Time_LP_EDSS_scale + Age_LP_scale + Sex + (Time_LP_EDSS_scale | Family_ID), data = edss_long_LPEDSSna, REML = FALSE, na.action = na.omit)
+m3_preds<-data.frame(time=edss_long_LPEDSSna$Time_LP_EDSS,pred=fitted(m3na),subject=edss_long_LPEDSSna$Family_ID)
+m3_preds_plot<-ggplot(data=m3_preds,aes(x=time,y=pred,group=subject,color=subject))+theme_classic()+geom_line()
+m3_preds_plot
+# Plotting the model
+plot_model(m3, sort.est=TRUE, transform=NULL, show.values=TRUE, value.offset=.3)
+```
+
+h. Comparing models: m3 + m4
+```{r}
+anova(m2,m3)
+anova(m1,m2,m3)
+
+# Check for p hacking
+mixed(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + CHIT1_log_scale*Time_LP_EDSS_scale + Age_LP_scale + Sex + (Time_LP_EDSS_scale | Family_ID), data = edss_long_LPEDSS, REML = FALSE, na.action = na.omit, method = 'LRT')
+#Result is the same as likelihood ratio checks above. Therefore, I have the best model for the fixed effects included. 
+```
+There is a significant difference between the models. Adding an interaction for CHIT1 + time did make the model fitting significantly better. 
+
+i. Plot of interaction
+```{r}
+# Interaction plot of original model
+interaction<-plot_model(m3, type="pred", terms=c("Time_LP_EDSS_scale", "CHIT1_log_scale"), axis.label="", title="Model 3: Predicted values of EDSS")
+interaction + theme_sjplot()
+# Clean up variable names
+edss_long_LPEDSS_interaction<-edss_long_LPEDSS
+names(edss_long_LPEDSS_interaction)[names(edss_long_LPEDSS_interaction)=="CHIT1_log_scale"]<-"CHIT1"
+names(edss_long_LPEDSS_interaction)[names(edss_long_LPEDSS_interaction)=="Time_LP_EDSS_scale"]<-`Time from diagnosis`
+names(edss_long_LPEDSS_interaction)[names(edss_long_LPEDSS_interaction)=="EDSS_inv"]<-"EDSS"
+# Rerun model with cleaned variable names
+m3_interaction<-lmer(EDSS ~ CHIT1 + `Time from diagnosis` + CHIT1*`Time from diagnosis` + Age_LP_scale + Sex + (`Time from diagnosis` | Family_ID), data = edss_long_LPEDSS_interaction, REML = FALSE, na.action = na.omit)
+# Interaction plot of model with cleaned varaible names
+interaction<-plot_model(m3_interaction, type="pred", terms=c("Time from diagnosis", "CHIT1"), axis.label="", title="B. Model 3: Predicted values of EDSS")
+interaction + theme_sjplot2()
+interaction<-ggsave("fig6b.pdf", width=6, height=6)
+```
+
+j. Prediction of random effects
+Random effects are not estimated in the model - not included in output for above models.
+Instead, use the fitted model to predict random effects
+Also, the predicted random effects can be used to examine the assumptions for a linear mixed effect model
+
+Two assumptions in linear mixed model with random intercept:
+1. Error term follows a normal distribution
+2. Beta for individual (i) follows normal distribution
+
+First, calculate the predicted values of the random effect. 
+Second, extract residuals from the fitted model.
+Thrid, use QQ-plot to check normality. 
+
+Model 1:
+```{r}
+# Random effects
+m1_randomeffects<-ranef(m1)$Family_ID[["(Intercept)"]]
+m1_randomeffects
+m1_res<-residuals(m1)
+
+# Plot
+qqnorm(m1_randomeffects, ylab="Estimated random intercepts", xlim=c(-3, 3), ylim=c(-5, 5), main="Random intercepts")
+qqline(m1_randomeffects)
+```
+Note: Majority of points are on the line, normality assumptions hold. 
+
+Model 2:
+```{r}
+# Random effects
+m2_randomeffects<-ranef(m2)$Family_ID[["(Intercept)"]]
+m2_randomeffects
+m2_res<-residuals(m2)
+
+# Plot
+qqnorm(m2_randomeffects, ylab="Estimated random intercepts", xlim=c(-3, 3), ylim=c(-5, 5), main="Random intercepts")
+qqline(m2_randomeffects)
+```
+Note: Majority of points are on the line, normality assumptions hold. 
+
+Model 3:
+```{r}
+# Random effects
+m3_randomeffects<-ranef(m3)$Family_ID[["(Intercept)"]]
+m3_randomeffects
+m3_res<-residuals(m3)
+
+# Plot
+qqnorm(m3_randomeffects, ylab = "Estimated random intercepts", xlim=c(-3, 3), ylim=c(-5, 5), main="Random intercepts")
+qqline(m3_randomeffects)
+```
+Note: Majority of points are on the line, normality assumptions hold. 
+
+## Mixed models by sex -----------------------------------------------------------
+There appears to be a sex difference in figure 5: males seem to have more severe disability earlier compared to females. However, in the models above there is no significant sex difference. Run the mixed effects model by sex to see if the results are consistent between both groups. 
+Only running the models for time from diagnosis to EDSS.
+```{r}
+edss_long_LPEDSS_F<-subset(edss_long_LPEDSS, Sex %in% c("Female"))
+edss_long_LPEDSS_M<-subset(edss_long_LPEDSS, Sex %in% c("Male"))
+```
+
+Model 1
+```{r}
+## Females
+# Model
+m1F<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + Age_LP_scale + (1 | Family_ID), data = edss_long_LPEDSS_F, REML = FALSE, na.action = na.omit)
+# Check model convergence
+all_fit(m1F)    #No convergence warnings so good to go
+# Model summary
+summary(m1F)
+summ(m1F, digits=5)
+confint(m1F)
+# Plotting predictions
+#Predictions can't be calculated when the predicted values are greater than the number of variables in the model. To get around this I removed all NAs, then reran the model using the NA dataframe before plotting predictions. 
+edss_long_LPEDSS_Fna<-na.omit(edss_long_LPEDSS_F)
+m1Fna<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + Age_LP_scale + (1 | Family_ID), data = edss_long_LPEDSS_Fna, REML = FALSE, na.action = na.omit) 
+m1F_preds<-data.frame(time=edss_long_LPEDSS_Fna$Time_LP_EDSS,pred=fitted(m1Fna),subject=edss_long_LPEDSS_Fna$Family_ID)
+m1F_preds_plot<-ggplot(data=m1F_preds,aes(x=time,y=pred,group=subject,color=subject))+theme_classic()+geom_line()
+m1F_preds_plot
+# Plotting the model
+plot_model(m1F, sort.est = TRUE, transform = NULL, show.values = TRUE, value.offset = .3)
+# Prediction of random effects
+m1F_randomeffects<-ranef(m1F)$Family_ID[["(Intercept)"]]
+m1F_randomeffects
+m1F_res<-residuals(m1F)
+qqnorm(m1F_randomeffects, ylab = "Estimated random intercepts", xlim = c(-3, 3), ylim = c(-5, 5), main = "Random intercepts")
+qqline(m1F_randomeffects)
+
+## Males
+# Model
+m1M<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + Age_LP_scale + (1 | Family_ID), data = edss_long_LPEDSS_M, REML = FALSE, na.action = na.omit)
+# Check model convergence
+all_fit(m1M)    #No convergence warnings so good to go
+# Model summary
+summary(m1M)
+summ(m1M, digits=5)
+confint(m1M)
+# Plotting predictions
+#Predictions can't be calculated when the predicted values are greater than the number of variables in the model. To get around this I removed all NAs, then reran the model using the NA dataframe before plotting predictions. 
+edss_long_LPEDSS_Mna<-na.omit(edss_long_LPEDSS_M)
+m1Mna<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + Age_LP_scale + (1 | Family_ID), data = edss_long_LPEDSS_Mna, REML = FALSE, na.action = na.omit) 
+m1M_preds<-data.frame(time=edss_long_LPEDSS_Mna$Time_LP_EDSS,pred=fitted(m1Mna),subject=edss_long_LPEDSS_Mna$Family_ID)
+m1M_preds_plot<-ggplot(data=m1M_preds,aes(x=time,y=pred,group=subject,color=subject))+theme_classic()+geom_line()
+m1M_preds_plot
+# Plotting the model
+plot_model(m1M, sort.est = TRUE, transform = NULL, show.values = TRUE, value.offset = .3)
+# Prediction of random effects
+m1M_randomeffects<-ranef(m1M)$Family_ID[["(Intercept)"]]
+m1M_randomeffects
+m1M_res<-residuals(m1M)
+qqnorm(m1M_randomeffects, ylab = "Estimated random intercepts", xlim = c(-3, 3), ylim = c(-5, 5), main = "Random intercepts")
+qqline(m1M_randomeffects)
+```
+
+Model 2
+```{r}
+## Female
+# Model
+m2F<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + Age_LP_scale + (Time_LP_EDSS_scale | Family_ID), data = edss_long_LPEDSS_F, REML = FALSE, na.action = na.omit)
+# Check model convergence
+all_fit(m2F)    #No convergence warnings so good to go
+# Model summary
+summary(m2F)
+summ(m2F,digits=5)
+confint(m2F)
+# Plotting predictions
+#Predictions can't be calculated when the predicted values are greater than the number of variables in the model. To get around this I removed all NAs, then reran the model using the NA dataframe before plotting predictions. 
+m2Fna<-lmer(EDSS_inv ~ CHIT1_log + Time_LP_EDSS + Age_LP + (Time_LP_EDSS | Family_ID), data = edss_long_LPEDSS_Fna, REML = FALSE, na.action = na.omit)
+m2F_preds<-data.frame(time=edss_long_LPEDSS_Fna$Time_LP_EDSS,pred=fitted(m2Fna),subject=edss_long_LPEDSS_Fna$Family_ID)
+m2F_preds_plot<-ggplot(data=m2F_preds,aes(x=time,y=pred,group=subject,color=subject))+theme_classic()+geom_line()
+m2F_preds_plot
+# Plotting the model
+plot_model(m2F, sort.est = TRUE, transform = NULL, show.values = TRUE, value.offset = .3)
+# Prediction of random effects
+m2F_randomeffects<-ranef(m2F)$Family_ID[["(Intercept)"]]
+m2F_randomeffects
+m2F_res<-residuals(m2F)
+qqnorm(m2F_randomeffects, ylab = "Estimated random intercepts", xlim = c(-3, 3), ylim = c(-5, 5), main = "Random intercepts")
+qqline(m2F_randomeffects)
+
+## Male
+#Note: problematic model - not enough data
+m2M<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + Age_LP_scale + (Time_LP_EDSS_scale | Family_ID), data = edss_long_LPEDSS_M, REML = FALSE, na.action = na.omit)
+# Check model convergence
+all_fit(m2M)    #Model did fit, but it generated a warning because the random effects are very small
+# Model summary
+summary(m2M)
+summ(m2M,digits=5)
+confint(m2M)
+# Plotting predictions
+#Predictions can't be calculated when the predicted values are greater than the number of variables in the model. To get around this I removed all NAs, then reran the model using the NA dataframe before plotting predictions. 
+m2Mna<-lmer(EDSS_inv ~ CHIT1_log + Time_LP_EDSS + Age_LP + (Time_LP_EDSS | Family_ID), data = edss_long_LPEDSS_Mna, REML = FALSE, na.action = na.omit)
+m2M_preds<-data.frame(time=edss_long_LPEDSS_Mna$Time_LP_EDSS,pred=fitted(m2Mna),subject=edss_long_LPEDSS_Mna$Family_ID)
+m2M_preds_plot<-ggplot(data=m2M_preds,aes(x=time,y=pred,group=subject,color=subject))+theme_classic()+geom_line()
+m2M_preds_plot
+# Plotting the model
+plot_model(m2M, sort.est = TRUE, transform = NULL, show.values = TRUE, value.offset = .3)
+# Prediction of random effects
+m2M_randomeffects<-ranef(m2M)$Family_ID[["(Intercept)"]]
+m2M_randomeffects
+m2M_res<-residuals(m2M)
+qqnorm(m2M_randomeffects, ylab = "Estimated random intercepts", xlim = c(-3, 3), ylim = c(-5, 5), main = "Random intercepts")
+qqline(m2M_randomeffects)
+```
+
+Model 3
+```{r}
+## Female
+# Model
+m3F<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + CHIT1_log_scale*Time_LP_EDSS_scale + Age_LP_scale + (Time_LP_EDSS_scale | Family_ID), data = edss_long_LPEDSS_F, REML = FALSE, na.action = na.omit)
+# Check model convergence
+all_fit(m3F)   #No convergence warnings so good to go
+# Model summary
+summary(m3F)
+summ(m3F,digits=5)
+confint(m3F)
+# Plotting predictions
+#Predictions can't be calculated when the predicted values are greater than the number of variables in the model. To get around this I removed all NAs, then reran the model using the NA dataframe before plotting predictions. 
+m3Fna<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + CHIT1_log_scale*Time_LP_EDSS_scale + Age_LP_scale + (Time_LP_EDSS_scale | Family_ID), data = edss_long_LPEDSS_Fna, REML = FALSE, na.action = na.omit)
+m3Fna_preds<-data.frame(time=edss_long_LPEDSS_Fna$Time_LP_EDSS,pred=fitted(m3Fna),subject=edss_long_LPEDSS_Fna$Family_ID)
+m3Fna_preds_plot<-ggplot(data=m3Fna_preds,aes(x=time,y=pred,group=subject,color=subject))+theme_classic()+geom_line()
+m3Fna_preds_plot
+# Plotting the model
+plot_model(m3Fna, sort.est = TRUE, transform = NULL, show.values = TRUE, value.offset = .3)
+# Prediction of random effects
+m3F_randomeffects<-ranef(m3F)$Family_ID[["(Intercept)"]]
+m3F_randomeffects
+m3F_res<-residuals(m3F)
+qqnorm(m3F_randomeffects, ylab = "Estimated random intercepts", xlim = c(-3, 3), ylim = c(-5, 5), main = "Random intercepts")
+qqline(m3F_randomeffects)
+
+## Male
+#Note: problematic model - not enough data
+m3M<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + CHIT1_log_scale*Time_LP_EDSS_scale + Age_LP_scale + (Time_LP_EDSS_scale | Family_ID), data = edss_long_LPEDSS_M, REML = FALSE, na.action = na.omit)
+# Check model convergence
+all_fit(m3M)   #Model did fit, but it generated a warning because the random effects are very small
+# Model summary
+summary(m3M)
+summ(m3M,digits=5)
+confint(m3M)
+# Plotting predictions
+#Predictions can't be calculated when the predicted values are greater than the number of variables in the model. To get around this I removed all NAs, then reran the model using the NA dataframe before plotting predictions. 
+m3Mna<-lmer(EDSS_inv ~ CHIT1_log_scale + Time_LP_EDSS_scale + CHIT1_log_scale*Time_LP_EDSS_scale + Age_LP_scale + (Time_LP_EDSS_scale | Family_ID), data = edss_long_LPEDSS_Mna, REML = FALSE, na.action = na.omit)
+m3Mna_preds<-data.frame(time=edss_long_LPEDSS_Mna$Time_LP_EDSS,pred=fitted(m3Mna),subject=edss_long_LPEDSS_Mna$Family_ID)
+m3Mna_preds_plot<-ggplot(data=m3Mna_preds,aes(x=time,y=pred,group=subject,color=subject))+theme_classic()+geom_line()
+m3Mna_preds_plot
+# Plotting the model
+plot_model(m3Mna, sort.est = TRUE, transform = NULL, show.values = TRUE, value.offset = .3)
+# Prediction of random effects
+m3M_randomeffects<-ranef(m3M)$Family_ID[["(Intercept)"]]
+m3M_randomeffects
+m3M_res<-residuals(m3M)
+qqnorm(m3M_randomeffects, ylab = "Estimated random intercepts", xlim = c(-3, 3), ylim = c(-5, 5), main = "Random intercepts")
+qqline(m3M_randomeffects)
+```
