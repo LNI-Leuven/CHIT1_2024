@@ -1,4 +1,5 @@
 # CHIT1 AT DIAGNOSIS IN MS - CODE
+https://zenodo.org/badge/663491793.svg
 This public repository contains the R code scripts to reproduce the main results and figures from our article **CHIT1 at diagnosis predicts faster disability progression and reflects early microglial activation in multiple sclerosis** published in *Nature Communications* (Beliën et al.; 2024). In this study we provided a clear rationale for further validation of CHIT1 as a prognostic biomarker in multiple sclerosis (MS). To do so, we applied mixed-effects models, a machine learning approach and single-cell/nucleus transcriptomics. The R code for these analyses is here available and structured as follows:
 
 **Statistical models**
