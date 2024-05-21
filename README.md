@@ -24,5 +24,5 @@ These are R Markdown documents written in R.
 - Pathway analysis: `8. Pathway_Analysis.Rmd`
 - Reviewers' comments: `Reviewers' comments.Rmd`
 
-## Contributors:
+## Contributors
 This code was created by members of the [Laboratory for Neuroimmunology](https://gbiomed.kuleuven.be/english/research/50000666/50000668/50525530/laboratory-for-neuroimmunology) as well as the Department of Public Health and Primary Care at the KU Leuven (Belgium).
