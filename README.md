@@ -5,6 +5,7 @@ This public repository contains the scripts used to reproduce the main results a
 
 **Statistical models**
 - Correlation, single-time point and multi-time point analysis: `Biomarker and CHIT1 analyses.Rmd`
+
 This is an R Markdown document writtin in R.
 
 **Machine learning**
@@ -22,6 +23,7 @@ This is an R Markdown document writtin in R.
 - Distribution and DGE CHIT1+ cells: `7. Distribution_And_DGE_CHIT1_Cells.Rmd`
 - Pathway analysis: `8. Pathway_Analysis.Rmd`
 - Reviewers' comments: `Reviewers' comments.Rmd`
+
 These are R Markdown documents written in R.
 
 ## Contributors
