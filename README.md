@@ -27,4 +27,4 @@ This is an R Markdown document writtin in R.
 These are R Markdown documents written in R.
 
 ## Contributors
-This code was created by [Jarne Beliën](https://github.com/JarneBelien), (Stijn Swinnen)[https://orcid.org/0000-0003-1028-197X] and [Sinéad Moylett](https://scholar.google.co.uk/citations?user=1QSPf4IAAAAJ&hl=en) from the [Laboratory for Neuroimmunology](https://gbiomed.kuleuven.be/english/research/50000666/50000668/50525530/laboratory-for-neuroimmunology) as well as [Robbe D'hondt](https://github.com/robbedhondt) from the Department of Public Health and Primary Care at the KU Leuven (Belgium).
+This code was created by [Jarne Beliën](https://github.com/JarneBelien), [Stijn Swinnen](https://orcid.org/0000-0003-1028-197X) and [Sinéad Moylett](https://scholar.google.co.uk/citations?user=1QSPf4IAAAAJ&hl=en) from the [Laboratory for Neuroimmunology](https://gbiomed.kuleuven.be/english/research/50000666/50000668/50525530/laboratory-for-neuroimmunology) as well as [Robbe D'hondt](https://github.com/robbedhondt) from the Department of Public Health and Primary Care at the KU Leuven (Belgium).
