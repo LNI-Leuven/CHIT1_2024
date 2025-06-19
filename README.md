@@ -1,7 +1,7 @@
 # CHIT1 AT DIAGNOSIS IN MS - CODE
 [![DOI](https://zenodo.org/badge/663491793.svg)](https://zenodo.org/doi/10.5281/zenodo.11235175)
 
-This public repository contains the scripts used to reproduce the main results and figures from our article **CHIT1 at diagnosis predicts faster disability progression and reflects early microglial activation in multiple sclerosis** published in *Nature Communications* ([Beliën et al.; 2024](https://www.nature.com/articles/s41467-024-49312-y)). In this study we provided a clear rationale for further validation of CHIT1 as a prognostic biomarker in multiple sclerosis (MS). To do so, we applied mixed-effects models, a machine learning approach and single-cell/nucleus transcriptomics. The code for these analyses is here available and structured as follows:
+This public repository contains the scripts used to reproduce the main results and figures from our article **CHIT1 at diagnosis predicts faster disability progression and reflects early microglial activation in multiple sclerosis** published in *Nature Communications* ([Beliën & Swinnen et al.; 2024](https://www.nature.com/articles/s41467-024-49312-y)). In this study we provided a clear rationale for further validation of CHIT1 as a prognostic biomarker in multiple sclerosis (MS). To do so, we applied mixed-effects models, a machine learning approach and single-cell/nucleus transcriptomics. The code for these analyses is here available and structured as follows:
 
 **Statistical models**
 - Correlation, single-time point and multi-time point analysis: `Biomarker and CHIT1 analyses.Rmd`
